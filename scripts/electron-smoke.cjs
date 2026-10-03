@@ -19,6 +19,14 @@ async function waitFor(code,label) {
   throw new Error("Timed out: "+label+"; "+await execute('$("toast").textContent'));
 }
 function command(code) { return execute("(async()=>{"+code+"})()"); }
+async function assertBoardCentered(label) {
+  const geometry='(()=>{const v=$("boardViewport"),vr=v.getBoundingClientRect(),r=$("boardCanvas").getBoundingClientRect();return {dx:r.left+r.width/2-(vr.left+v.clientLeft+v.clientWidth/2),dy:r.top+r.height/2-(vr.top+v.clientTop+v.clientHeight/2),overflowX:v.scrollWidth-v.clientWidth,overflowY:v.scrollHeight-v.clientHeight};})()';
+  await waitFor('(()=>{const p='+geometry+';return Math.abs(p.dx)<1 && Math.abs(p.dy)<1 && p.overflowX===0 && p.overflowY===0;})()',label+" centered");
+  const position=await execute(geometry);
+  assert.ok(Math.abs(position.dx)<1 && Math.abs(position.dy)<1,label+": "+JSON.stringify(position));
+  assert.equal(position.overflowX,0,label+" horizontal overflow");
+  assert.equal(position.overflowY,0,label+" vertical overflow");
+}
 async function setup() {
   const folder=path.join(root,"projects","Демо"),files=path.join(root,"files");
   await fs.mkdir(folder,{recursive:true});await fs.mkdir(path.join(files,"Назначение"),{recursive:true});
@@ -41,6 +49,32 @@ app.whenReady().then(async()=>{
     await command("await showProjects();");
     await execute('$("projectsList").querySelector("button").click()');
     await waitFor('state.project?.components.length===17 && !$("boardSizer").hidden',"open legacy project");
+    await assertBoardCentered("open project");
+    for(const [w,h] of [[300,900],[1400,400],[200,100]]) {
+      await command('state.project.imageSizes.TOP={w:'+w+',h:'+h+'};await loadBoard();');
+      await assertBoardCentered("load "+w+"x"+h);
+    }
+    await command('state.project.imageSizes.TOP={w:512,h:512};await loadBoard();');
+    win.setSize(1100,740);await delay(100);
+    await assertBoardCentered("resize fitted view");
+    // Zoom must preserve the image point under the cursor after the centered offset changes.
+    const zoomPoint=await execute('(()=>{const v=$("boardViewport"),vr=v.getBoundingClientRect(),r=$("boardCanvas").getBoundingClientRect();const x=r.left-vr.left-v.clientLeft+r.width*.44,y=r.top-vr.top-v.clientTop+r.height*.52;return {x,y,imageX:(x+v.scrollLeft-state.boardOffset.left)/state.scale,imageY:(y+v.scrollTop-state.boardOffset.top)/state.scale};})()');
+    await command('setZoom(4,'+JSON.stringify({x:zoomPoint.x,y:zoomPoint.y})+');');
+    const zoomedPoint=await execute('({x:('+zoomPoint.x+'+$("boardViewport").scrollLeft-state.boardOffset.left)/state.scale,y:('+zoomPoint.y+'+$("boardViewport").scrollTop-state.boardOffset.top)/state.scale})');
+    assert.ok(Math.abs(zoomedPoint.x-zoomPoint.imageX)<.5 && Math.abs(zoomedPoint.y-zoomPoint.imageY)<.5,"zoom cursor anchor");
+    win.setSize(1200,800);await delay(100);
+    assert.equal(await execute('state.scale'),4,"resize preserves manual zoom");
+    const panBefore=await execute('({left:$("boardViewport").scrollLeft,top:$("boardViewport").scrollTop})');
+    win.webContents.sendInputEvent({type:"mouseDown",button:"middle",x:600,y:400,clickCount:1});
+    win.webContents.sendInputEvent({type:"mouseMove",x:630,y:440});
+    win.webContents.sendInputEvent({type:"mouseUp",button:"middle",x:630,y:440,clickCount:1});await delay(50);
+    const panAfter=await execute('({left:$("boardViewport").scrollLeft,top:$("boardViewport").scrollTop})');
+    assert.equal(panAfter.left,panBefore.left-30);assert.equal(panAfter.top,panBefore.top-40);
+    await command('selectComponent(state.project.components.find(c=>c.side==="TOP" && c.ref==="R6"),true);');
+    assert.ok(await execute('(()=>{const v=$("boardViewport"),vr=v.getBoundingClientRect(),r=$("overlays").querySelector(\'[data-key="TOP:R6"]\').getBoundingClientRect();return Math.abs(r.left+r.width/2-vr.left-v.clientLeft-v.clientWidth/2)<1 && Math.abs(r.top+r.height/2-vr.top-v.clientTop-v.clientHeight/2)<1;})()'),"focus component in zoomed view");
+    win.setSize(1460,960);await delay(100);
+    await execute('$("fitBoard").click()');
+    await assertBoardCentered("fit after zoom and pan");
     assert.equal(await execute('state.project.doneMap["TOP:R1"]'),true);
     assert.equal(await execute('Object.hasOwn(state.project,"extraPayload")'),false);
     assert.deepEqual(await execute('A.batches(filtered(),state.project.doneMap).map(b=>[b.type,b.remaining,b.total])'),[["R",7,8],["C",6,6]]);
@@ -52,10 +86,12 @@ app.whenReady().then(async()=>{
     await execute('$("toggleSolder").click()');await waitFor('state.project.doneMap["TOP:R2"]===true',"solder mark");
     await execute('$("undoButton").click()');await waitFor('!state.project.doneMap["TOP:R2"]',"undo solder mark");
     await execute('$("bottomButton").click()');await waitFor('state.side==="BOTTOM" && $("boardImage").src.includes("bottom.png")',"bottom side");
+    await assertBoardCentered("switch bottom");
     assert.equal(await execute('filtered().length'),3);
     await command('const c=state.project.components.find(c=>c.side==="BOTTOM");componentContext({preventDefault(){},stopPropagation(){},clientX:450,clientY:280},c);');
     await execute('$("contextMenu").firstElementChild.click()');await waitFor('state.filters.nominal && filtered().length===3',"context nominal");
     await execute('$("topButton").click()');await waitFor('state.side==="TOP" && !state.filters.nominal',"return top");
+    await waitFor('!$("boardSizer").hidden',"top image loaded");await assertBoardCentered("switch top");
     await execute('$("searchInput").value="100nf";$("searchInput").dispatchEvent(new Event("input",{bubbles:true}));');
     assert.equal(await execute('filtered().length'),6);
     await execute('$("searchInput").value="R2, R8";$("searchInput").dispatchEvent(new Event("input",{bubbles:true}));');
@@ -114,8 +150,10 @@ app.whenReady().then(async()=>{
     await execute('$("fileRename").click()');await waitFor('$("promptDialog").open',"rename prompt");
     await execute('$("promptInput").value="Переименовано";$("promptForm").requestSubmit()');
     await waitFor('fileItems().some(item=>item.name==="Переименовано")',"rename folder");
-    await command('await openBrowser("image","BOTTOM",'+JSON.stringify(fixture.files)+');const item=fileItems().find(f=>f.name==="board.png");selectFile({},item);');
+    await command('await setSide("BOTTOM");await openBrowser("image","BOTTOM",'+JSON.stringify(fixture.files)+');const item=fileItems().find(f=>f.name==="board.png");selectFile({},item);');
     await execute('$("filePick").click()');await waitFor('!$("filesDialog").open && state.project.images.BOTTOM.file==="bottom (2).png"',"import side image");
+    await waitFor('!$("boardSizer").hidden',"image import loaded");await assertBoardCentered("import image");
+    await command('await setSide("TOP");');
     await command('await saveProject();');
     const saved=JSON.parse(await fs.readFile(path.join(fixture.folder,"project.json"),"utf8"));
     assert.equal(saved.components.length,18);assert.equal(saved.doneMap["TOP:R1"],true);assert.ok(!("extraPayload" in saved));
@@ -128,13 +166,14 @@ app.whenReady().then(async()=>{
     const screenshot=await win.webContents.capturePage();
     await fs.writeFile(path.join(root,"soldermap-workspace.png"),screenshot.toPNG());
     win.setSize(980,680);await delay(100);
+    await assertBoardCentered("narrow fitted view");
     assert.equal(await execute('document.body.scrollWidth <= innerWidth'),true);
     await command('await openBrowser("browse",null,'+JSON.stringify(fixture.files)+');');
     assert.equal(await execute('$("fileItems").scrollWidth <= $("fileItems").clientWidth'),true);
     const filesScreenshot=await win.webContents.capturePage();
     await fs.writeFile(path.join(root,"soldermap-files.png"),filesScreenshot.toPNG());
     assert.deepEqual(errors,[]);
-    console.log("PASS Electron smoke: projects, legacy data, side batches, context menu, solder/undo, project solder reset/cancel/undo/redo/persist, search, wheel zoom, draw/edit, files copy/conflict/new/rename, image import, active project relocation, narrow layout. Screenshots: "+root);
+    console.log("PASS Electron smoke: projects, legacy data, board centering/load/side/import/fit/resize, zoom anchoring/pan, side batches, context menu, solder/undo, project solder reset/cancel/undo/redo/persist, search, wheel zoom, draw/edit, files copy/conflict/new/rename, image import, active project relocation, narrow layout. Screenshots: "+root);
     win.destroy();app.quit();
   }catch(error){console.error(error);console.error(errors);win?.destroy();app.exit(1);}
 });

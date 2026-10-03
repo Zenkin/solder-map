@@ -5,7 +5,7 @@ const copy = value => JSON.parse(JSON.stringify(value));
 const state = {
   project:null, folder:null, side:"TOP", mode:"solder", tab:"batches", selected:null,
   filters:{query:"",status:"all",stage:"",group:"",nominal:""}, sort:"remaining",
-  scale:1, undo:[], redo:[], dirty:false, revision:0, saveChain:Promise.resolve(),
+  scale:1, boardOffset:{left:32,top:32}, fitted:true, undo:[], redo:[], dirty:false, revision:0, saveChain:Promise.resolve(),
   imageToken:0, drawing:false, placeTarget:null, space:false
 };
 const browser = {
@@ -96,7 +96,7 @@ async function newProject() {
 }
 function resetWorkspace() {
   state.side="TOP";state.selected=null;state.undo=[];state.redo=[];state.filters={query:"",status:"all",stage:"",group:"",nominal:""};
-  state.mode="solder";state.tab="batches";state.drawing=false;state.placeTarget=null;state.dirty=false;state.scale=1;state.imageToken++;
+  state.mode="solder";state.tab="batches";state.drawing=false;state.placeTarget=null;state.dirty=false;state.scale=1;state.fitted=true;state.imageToken++;
 }
 async function openProject(folder) {
   await saveProject();const data=await window.projectApi.readProject(folder);
@@ -140,21 +140,28 @@ async function importImage(item,side) {
 }
 function updateBoardSize() {
   const size=state.project?.imageSizes[state.side]||{w:1024,h:768};
+  const viewport=$("boardViewport"),width=size.w*state.scale,height=size.h*state.scale;
   $("boardCanvas").style.width=size.w+"px";$("boardCanvas").style.height=size.h+"px";
   $("boardCanvas").style.transform="scale("+state.scale+")";
-  $("boardSizer").style.width=size.w*state.scale+"px";$("boardSizer").style.height=size.h*state.scale+"px";
+  // Re-read the viewport as scrollbars appear/disappear; never center beyond a reachable edge.
+  for(let pass=0;pass<3;pass++) {
+    const extentWidth=Math.max(viewport.clientWidth,width+64),extentHeight=Math.max(viewport.clientHeight,height+64);
+    state.boardOffset={left:(extentWidth-width)/2,top:(extentHeight-height)/2};
+    $("boardSizer").style.width=extentWidth+"px";$("boardSizer").style.height=extentHeight+"px";
+    $("boardCanvas").style.left=state.boardOffset.left+"px";$("boardCanvas").style.top=state.boardOffset.top+"px";
+  }
   $("zoomLabel").textContent=Math.round(state.scale*100)+"%";$("zoomSlider").value=Math.round(state.scale*100);
 }
 function setZoom(next,anchor) {
   const viewport=$("boardViewport");anchor=anchor||{x:viewport.clientWidth/2,y:viewport.clientHeight/2};
-  const zoom=A.zoomAt({scale:state.scale},next,anchor,{left:viewport.scrollLeft-32,top:viewport.scrollTop-32});
-  state.scale=zoom.scale;updateBoardSize();
-  viewport.scrollLeft=zoom.left+32;viewport.scrollTop=zoom.top+32;
+  const zoom=A.zoomAt({scale:state.scale},next,anchor,{left:viewport.scrollLeft-state.boardOffset.left,top:viewport.scrollTop-state.boardOffset.top});
+  state.scale=zoom.scale;state.fitted=false;updateBoardSize();
+  viewport.scrollLeft=zoom.left+state.boardOffset.left;viewport.scrollTop=zoom.top+state.boardOffset.top;
 }
 function fitBoard() {
   const size=state.project?.imageSizes[state.side];if(!size)return;
   const viewport=$("boardViewport");
-  state.scale=Math.max(.05,Math.min((viewport.clientWidth-64)/size.w,(viewport.clientHeight-64)/size.h,2));
+  state.scale=Math.max(.05,Math.min((viewport.clientWidth-64)/size.w,(viewport.clientHeight-64)/size.h,2));state.fitted=true;
   updateBoardSize();viewport.scrollLeft=0;viewport.scrollTop=0;
 }
 function syncSelect(id,entries,value,empty) {
@@ -253,8 +260,8 @@ function selectComponent(c,focus=false) {
 }
 function focusComponent(c) {
   const viewport=$("boardViewport");
-  viewport.scrollLeft=32+(c.x+c.w/2)*state.scale-viewport.clientWidth/2;
-  viewport.scrollTop=32+(c.y+c.h/2)*state.scale-viewport.clientHeight/2;
+  viewport.scrollLeft=state.boardOffset.left+(c.x+c.w/2)*state.scale-viewport.clientWidth/2;
+  viewport.scrollTop=state.boardOffset.top+(c.y+c.h/2)*state.scale-viewport.clientHeight/2;
 }
 function chooseBatch(batch) {
   state.filters.nominal=batch.key;state.tab="components";
@@ -588,6 +595,13 @@ function connect() {
   },{passive:false});
   $("boardViewport").addEventListener("pointerdown",beginBoard);$("boardViewport").addEventListener("pointermove",moveBoard);
   $("boardViewport").addEventListener("pointerup",endBoard);$("boardViewport").addEventListener("pointercancel",endBoard);
+  let boardResizeFrame;
+  new ResizeObserver(()=>{
+    cancelAnimationFrame(boardResizeFrame);
+    boardResizeFrame=requestAnimationFrame(()=>{
+      if(!$("boardSizer").hidden)state.fitted?fitBoard():updateBoardSize();
+    });
+  }).observe($("boardViewport"));
   $("searchInput").addEventListener("input",event=>{state.filters.query=event.target.value;renderList();renderBoard();});
   for(const [id,field] of [["statusFilter","status"],["stageFilter","stage"],["groupFilter","group"]])$(id).addEventListener("change",event=>{state.filters[field]=event.target.value;render();});
   $("batchSort").addEventListener("change",event=>{state.sort=event.target.value;renderList();});
