@@ -30,7 +30,7 @@ async function setup() {
   for(let i=0;i<8;i++)components.push({ref:"R"+(i+1),value:i%2?"10 кОм":"10k",side:"TOP",x:35+i%4*110,y:95+Math.floor(i/4)*95,w:75,h:35});
   for(let i=0;i<6;i++)components.push({ref:"C"+(i+1),value:i%2?"0.1uF":"100 нФ",side:"TOP",x:35+i%3*155,y:300+Math.floor(i/3)*80,w:70,h:40});
   for(let i=0;i<3;i++)components.push({ref:"R"+(i+1),value:"10k",side:"BOTTOM",x:70+i*120,y:180,w:75,h:35});
-  await fs.writeFile(path.join(folder,"project.json"),JSON.stringify({version:3,name:"Демо",images:{TOP:{file:"top.png"},BOTTOM:{file:"bottom.png"}},imageSizes:{TOP:{w:512,h:512},BOTTOM:{w:512,h:512}},components,doneMap:{"TOP:R1":true},extraPayload:{a:1}}));
+  await fs.writeFile(path.join(folder,"project.json"),JSON.stringify({version:3,name:"Демо",images:{TOP:{file:"top.png"},BOTTOM:{file:"bottom.png"}},imageSizes:{TOP:{w:512,h:512},BOTTOM:{w:512,h:512}},components,doneMap:{"TOP:R1":true,"BOTTOM:R1":true},extraPayload:{a:1}}));
   return {folder,files};
 }
 app.whenReady().then(async()=>{
@@ -60,6 +60,23 @@ app.whenReady().then(async()=>{
     assert.equal(await execute('filtered().length'),6);
     await execute('$("searchInput").value="R2, R8";$("searchInput").dispatchEvent(new Event("input",{bubbles:true}));');
     assert.equal(await execute('filtered().length'),2);
+    await execute('$("resetFilters").click()');
+    // Reset applies to both sides even when the visible list hides soldered items.
+    await execute('$("searchInput").value="100nf";$("searchInput").dispatchEvent(new Event("input",{bubbles:true}));$("statusFilter").value="pending";$("statusFilter").dispatchEvent(new Event("change",{bubbles:true}));');
+    await execute('$("resetSoldering").click()');await waitFor('$("promptDialog").open',"reset solder prompt");
+    await execute('$("promptCancel").click()');
+    assert.deepEqual(await execute('state.project.doneMap'),{"TOP:R1":true,"BOTTOM:R1":true});
+    await execute('$("resetSoldering").click()');await waitFor('$("promptDialog").open',"reset solder confirmation");
+    await execute('$("promptForm").requestSubmit()');await waitFor('Object.keys(state.project.doneMap).length===0',"reset both sides");
+    assert.equal(await execute('state.filters.status'),"all");
+    assert.equal(await execute('$("resetSoldering").disabled'),true);
+    assert.equal(await execute('$("overlays").querySelectorAll(".done").length'),0);
+    await command('await saveProject();');
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(fixture.folder,"project.json"),"utf8")).doneMap,{});
+    await execute('$("undoButton").click()');await waitFor('state.project.doneMap["TOP:R1"] && state.project.doneMap["BOTTOM:R1"]',"undo reset");
+    assert.equal(await execute('$("resetSoldering").disabled'),false);
+    await execute('$("redoButton").click()');await waitFor('Object.keys(state.project.doneMap).length===0',"redo reset");
+    await execute('$("undoButton").click()');await waitFor('state.project.doneMap["TOP:R1"] && state.project.doneMap["BOTTOM:R1"]',"restore fixture marks");
     await execute('$("resetFilters").click()');
     const previous=await execute('state.scale');
     await execute('$("boardViewport").dispatchEvent(new WheelEvent("wheel",{deltaY:-400,clientX:600,clientY:400,bubbles:true,cancelable:true}));');
@@ -106,7 +123,7 @@ app.whenReady().then(async()=>{
     const filesScreenshot=await win.webContents.capturePage();
     await fs.writeFile(path.join(root,"soldermap-files.png"),filesScreenshot.toPNG());
     assert.deepEqual(errors,[]);
-    console.log("PASS Electron smoke: projects, legacy data, side batches, context menu, solder/undo, search, wheel zoom, draw/edit, files copy/conflict/new/rename, image import, active project relocation, narrow layout. Screenshots: "+root);
+    console.log("PASS Electron smoke: projects, legacy data, side batches, context menu, solder/undo, project solder reset/cancel/undo/redo/persist, search, wheel zoom, draw/edit, files copy/conflict/new/rename, image import, active project relocation, narrow layout. Screenshots: "+root);
     win.destroy();app.quit();
   }catch(error){console.error(error);console.error(errors);win?.destroy();app.exit(1);}
 });

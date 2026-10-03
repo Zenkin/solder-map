@@ -166,6 +166,7 @@ function syncSelect(id,entries,value,empty) {
 function render() {
   $("projectName").textContent=state.project?.name||"Откройте проект";
   $("saveButton").disabled=!state.project;$("undoButton").disabled=!state.undo.length;$("redoButton").disabled=!state.redo.length;
+  $("resetSoldering").disabled=!state.project||!Object.values(state.project.doneMap).some(Boolean);
   $("topButton").classList.toggle("active",state.side==="TOP");$("bottomButton").classList.toggle("active",state.side==="BOTTOM");
   $("solderMode").classList.toggle("active",state.mode==="solder");$("editMode").classList.toggle("active",state.mode==="edit");
   $("addComponent").hidden=state.mode!=="edit";$("editHelp").hidden=state.mode!=="edit";
@@ -272,6 +273,14 @@ function toggleSolder(c=selectedComponent()) {
   if(!c)return;
   const done=!state.project.doneMap[A.key(c)];
   mutate(()=>{if(done)state.project.doneMap[A.key(c)]=true;else delete state.project.doneMap[A.key(c)];});
+}
+async function resetSoldering() {
+  if(!state.project||!Object.values(state.project.doneMap).some(Boolean))return;
+  const folder=state.folder;
+  if(!await ask("Снять отметки пайки у всех?","Все компоненты на TOP и BOTTOM станут ожидающими пайки, независимо от выбранного номинала и текущих фильтров.",null,"Снять все отметки"))return;
+  if(state.folder!==folder)return;
+  mutate(()=>{state.project.doneMap={};state.filters.status="all";});
+  toast("Все отметки пайки сняты. Ctrl+Z — отменить.");
 }
 function componentContext(event,c) {
   event.preventDefault();event.stopPropagation();selectComponent(c);
@@ -564,6 +573,7 @@ function connect() {
   click("projectsButton",showProjects);click("emptyProjects",showProjects);
   click("filesButton",()=>openBrowser());click("newProject",newProject);click("openProjectFolder",()=>openBrowser("project"));
   click("saveButton",saveProject);click("undoButton",()=>historyAction());click("redoButton",()=>historyAction(true));
+  click("resetSoldering",resetSoldering);
   click("topButton",()=>setSide("TOP"));click("bottomButton",()=>setSide("BOTTOM"));
   click("loadImage",()=>state.project&&openBrowser("image",state.side));
   click("solderMode",()=>{state.mode="solder";state.drawing=false;state.placeTarget=null;render();});click("editMode",()=>{state.mode="edit";render();});

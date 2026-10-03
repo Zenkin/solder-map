@@ -28,6 +28,8 @@ The default batch sort uses remaining unsoldered quantity in descending order; t
 
 Pending components are blue; soldered components are green. Selection and batch emphasis use neutral outlines. Stages and groups are filters and metadata, with no color system. Solder marks use explicit reversible commands, with confirmation for a whole batch.
 
+The project-level reset command clears all solder marks on TOP and BOTTOM regardless of active filters, after confirmation. It uses the existing undo/redo and save path, and resets the solder-status filter to show the now-pending components.
+
 ## Viewport and editor
 
 Rectangle coordinates remain in image pixels. Zoom changes only the display transform and scrollable canvas size, with cursor anchoring and limits of 5–800%. Space-drag and the middle mouse button pan. Drawing, movement and resize convert pointer positions back into source pixels.
