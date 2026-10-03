@@ -27,6 +27,16 @@ async function assertBoardCentered(label) {
   assert.equal(position.overflowX,0,label+" horizontal overflow");
   assert.equal(position.overflowY,0,label+" vertical overflow");
 }
+async function hoverComponent(ref) {
+  const point=await execute('(()=>{const r=$("overlays").querySelector(\'[data-key="TOP:'+ref+'"]\').getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)};})()');
+  win.webContents.sendInputEvent({type:"mouseMove",...point});
+  await waitFor('!$("componentTooltip").hidden && $("componentTooltip").dataset.key==="TOP:'+ref+'"',"hover "+ref);
+}
+async function assertTooltipReadable(label) {
+  const geometry=await execute('(()=>{const t=$("componentTooltip"),r=t.getBoundingClientRect(),v=$("boardViewport"),b=v.getBoundingClientRect(),ref=t.querySelector(".tooltip-ref");return {inside:r.left>=b.left+v.clientLeft && r.right<=b.left+v.clientLeft+v.clientWidth && r.top>=b.top+v.clientTop && r.bottom<=b.top+v.clientTop+v.clientHeight,font:parseFloat(getComputedStyle(ref).fontSize),textHeight:ref.getBoundingClientRect().height,overflow:t.scrollWidth-t.clientWidth,clipped:t.scrollHeight-t.clientHeight,scaledAncestor:!!t.closest("#boardCanvas")};})()');
+  assert.ok(geometry.inside,label+" fits viewport");assert.equal(geometry.font,22,label+" font size");assert.ok(geometry.textHeight>=26,label+" rendered text size");
+  assert.equal(geometry.overflow,0,label+" wraps text");assert.equal(geometry.clipped,0,label+" complete text");assert.equal(geometry.scaledAncestor,false,label+" outside zoom transform");
+}
 async function setup() {
   const folder=path.join(root,"projects","Демо"),files=path.join(root,"files");
   await fs.mkdir(folder,{recursive:true});await fs.mkdir(path.join(files,"Назначение"),{recursive:true});
@@ -75,6 +85,26 @@ app.whenReady().then(async()=>{
     win.setSize(1460,960);await delay(100);
     await execute('$("fitBoard").click()');
     await assertBoardCentered("fit after zoom and pan");
+    // Hover information stays readable at both zoom limits and wraps at every viewport edge.
+    await command('const c=state.project.components.find(c=>c.side==="TOP" && c.ref==="R1");c.value="0.1Вт 0603 10 кОм, 0.1%";renderBoard();');
+    for(const scale of [.05,.4,4,8]) {
+      await command('setZoom('+scale+');focusComponent(state.project.components.find(c=>c.side==="TOP" && c.ref==="R1"));');await delay(50);
+      await hoverComponent("R1");await assertTooltipReadable("hover at "+scale*100+"%");
+      assert.equal(await execute('$("componentTooltip").querySelector(".tooltip-nominal").textContent'),"10 кОм");
+      assert.ok((await execute('$("componentTooltip").textContent')).includes("0.1Вт 0603"));
+      assert.ok((await execute('$("componentTooltip").textContent')).includes("Припаян"));
+      if(scale===.4)await fs.writeFile(path.join(root,"soldermap-tooltip.png"),(await win.webContents.capturePage()).toPNG());
+    }
+    await command('state.project.components.find(c=>c.side==="TOP" && c.ref==="R1").value="ОченьДлинноеОписаниеКомпонентаБезПробелов".repeat(6).slice(0,200);renderBoard();');
+    for(const [x,y] of [[1,1],[0,1],[1,0],[0,0]]) {
+      await command('const v=$("boardViewport"),r=v.getBoundingClientRect(),box=$("overlays").querySelector(\'[data-key="TOP:R1"]\');box.dispatchEvent(new PointerEvent("pointermove",{clientX:r.left+v.clientLeft+'+x+'*(v.clientWidth-2)+1,clientY:r.top+v.clientTop+'+y+'*(v.clientHeight-2)+1,bubbles:true}));');
+      await assertTooltipReadable("hover corner "+x+","+y);
+    }
+    await execute('setZoom(1)');assert.equal(await execute('$("componentTooltip").hidden'),true,"hide on zoom");
+    await command('state.project.components.find(c=>c.side==="TOP" && c.ref==="R1").value="10k";renderBoard();fitBoard();');
+    await delay(50);await hoverComponent("R1");
+    win.webContents.sendInputEvent({type:"mouseMove",x:30,y:110});
+    await waitFor('$("componentTooltip").hidden',"hide when pointer leaves board");
     assert.equal(await execute('state.project.doneMap["TOP:R1"]'),true);
     assert.equal(await execute('Object.hasOwn(state.project,"extraPayload")'),false);
     assert.deepEqual(await execute('A.batches(filtered(),state.project.doneMap).map(b=>[b.type,b.remaining,b.total])'),[["R",7,8],["C",6,6]]);
@@ -173,7 +203,7 @@ app.whenReady().then(async()=>{
     const filesScreenshot=await win.webContents.capturePage();
     await fs.writeFile(path.join(root,"soldermap-files.png"),filesScreenshot.toPNG());
     assert.deepEqual(errors,[]);
-    console.log("PASS Electron smoke: projects, legacy data, board centering/load/side/import/fit/resize, zoom anchoring/pan, side batches, context menu, solder/undo, project solder reset/cancel/undo/redo/persist, search, wheel zoom, draw/edit, files copy/conflict/new/rename, image import, active project relocation, narrow layout. Screenshots: "+root);
+    console.log("PASS Electron smoke: projects, legacy data, board centering/load/side/import/fit/resize, readable hover at 5–800%/viewport edges, zoom anchoring/pan, side batches, context menu, solder/undo, project solder reset/cancel/undo/redo/persist, search, wheel zoom, draw/edit, files copy/conflict/new/rename, image import, active project relocation, narrow layout. Screenshots: "+root);
     win.destroy();app.quit();
   }catch(error){console.error(error);console.error(errors);win?.destroy();app.exit(1);}
 });

@@ -38,6 +38,8 @@ Rectangle coordinates remain in image pixels. Zoom changes only the display tran
 
 The board is centered on each axis that fits inside the viewport. Larger axes keep reachable 32-pixel outer padding and scroll normally. The scrollable stage covers the viewport or the scaled image plus padding, whichever is larger; its clipped extent prevents unscaled transformed boxes from causing phantom overflow. Zoom and component navigation use the actual display offset. Loading, switching sides and fitting center the image; viewport resizing adapts fitted views and preserves manual scale.
 
+Component hover information uses a fixed overlay outside the scaled canvas, with readable text independent of zoom. It shows the reference, nominal, available description/package and solder status, wraps long values, and flips/clamps to the visible viewport. Hover information is hidden during editing gestures, scrolling, zooming, rerendering and modal/context-menu interaction.
+
 Replacing an image scales existing rectangles proportionally to the new dimensions. Editing and soldering both participate in undo/redo.
 
 ## Files and saves

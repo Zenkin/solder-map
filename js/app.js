@@ -33,6 +33,7 @@ function run(callback) {
   return async (...args) => { try { await callback(...args); } catch(error) { toast(error.message,true); } };
 }
 function ask(title,message="",initial=null,ok="OK") {
+  hideComponentTooltip();
   if(promptResolve)promptResolve(null);
   $("promptTitle").textContent=title; $("promptMessage").textContent=message;
   $("promptMessage").hidden=!message; $("promptInput").hidden=initial===null;
@@ -77,6 +78,7 @@ async function saveProject() {
 }
 async function closeApp() { await saveProject();window.windowControls.close(); }
 async function showProjects() {
+  hideComponentTooltip();
   const projects=await window.projectApi.listProjects(),list=$("projectsList");list.replaceChildren();
   if(!projects.length)list.append(node("p","empty-note","Пока нет проектов. Создайте карту и загрузите изображения платы."));
   projects.forEach(project=>{
@@ -116,6 +118,7 @@ function imageInfo(url) {
   });
 }
 async function loadBoard() {
+  hideComponentTooltip();
   const token=++state.imageToken,side=state.side,file=state.project?.images[side]?.file;
   $("boardSizer").hidden=true;$("boardEmpty").hidden=false;
   if(!file)return;
@@ -139,6 +142,7 @@ async function importImage(item,side) {
   await loadBoard();toast("Изображение "+side+" добавлено.");
 }
 function updateBoardSize() {
+  hideComponentTooltip();
   const size=state.project?.imageSizes[state.side]||{w:1024,h:768};
   const viewport=$("boardViewport"),width=size.w*state.scale,height=size.h*state.scale;
   $("boardCanvas").style.width=size.w+"px";$("boardCanvas").style.height=size.h+"px";
@@ -215,6 +219,7 @@ function renderList() {
   }
 }
 function renderBoard() {
+  hideComponentTooltip();
   const overlays=$("overlays");overlays.replaceChildren();if(!state.project)return;
   const visible=new Set(filtered().map(A.key)),hasNominal=!!state.filters.nominal;
   state.project.components.filter(c=>c.side===state.side&&!c.unplaced).forEach(c=>{
@@ -225,13 +230,38 @@ function renderBoard() {
     box.classList.toggle("dimmed",hasNominal&&!visible.has(A.key(c)));
     box.classList.toggle("filtered-out",!hasNominal&&!visible.has(A.key(c)));
     Object.assign(box.style,{left:c.x+"px",top:c.y+"px",width:c.w+"px",height:c.h+"px"});
-    box.title=c.ref+" · "+A.nominal(c).label+" · "+(state.project.doneMap[A.key(c)]?"Припаян":"Ожидает пайки");
-    box.append(node("span","",c.ref));
+    box.setAttribute("aria-label",c.ref+" · "+A.nominal(c).label+" · "+(state.project.doneMap[A.key(c)]?"Припаян":"Ожидает пайки"));
     if(state.mode==="edit"&&state.selected===A.key(c))box.append(node("i","resize-handle"));
     box.addEventListener("click",event=>{event.stopPropagation();if(!interaction?.moved)selectComponent(c);});
     box.addEventListener("contextmenu",event=>componentContext(event,c));
     overlays.append(box);
   });
+}
+function hideComponentTooltip() { $("componentTooltip").hidden=true; }
+function showComponentTooltip(event) {
+  const box=event.target.closest(".component-box"),tooltip=$("componentTooltip");
+  if(!box||interaction||state.drawing||state.space||!$("contextMenu").hidden||document.querySelector("dialog[open]"))return hideComponentTooltip();
+  const c=state.project?.components.find(c=>A.key(c)===box.dataset.key);
+  if(!c)return hideComponentTooltip();
+  if(tooltip.hidden||tooltip.dataset.key!==box.dataset.key) {
+    const n=A.nominal(c),done=!!state.project.doneMap[A.key(c)];
+    tooltip.replaceChildren(node("strong","tooltip-ref",c.ref),node("div","tooltip-nominal",n.label));
+    const details=[n.description,c.type].filter(Boolean).join(" · ");
+    if(details)tooltip.append(node("div","tooltip-details",details));
+    tooltip.append(node("div","tooltip-status",done?"✓ Припаян":"● Ожидает пайки"));tooltip.dataset.key=box.dataset.key;
+  }
+  // Keep text outside the scaled canvas and within the visible board area.
+  const viewport=$("boardViewport"),bounds=viewport.getBoundingClientRect(),inset=12,gap=18;
+  const leftEdge=bounds.left+viewport.clientLeft+inset,topEdge=bounds.top+viewport.clientTop+inset;
+  const rightEdge=leftEdge+viewport.clientWidth-inset*2,bottomEdge=topEdge+viewport.clientHeight-inset*2;
+  tooltip.style.maxWidth=Math.min(340,Math.max(0,rightEdge-leftEdge))+"px";
+  tooltip.style.maxHeight=Math.max(0,bottomEdge-topEdge)+"px";tooltip.hidden=false;
+  const rect=tooltip.getBoundingClientRect();
+  let left=event.clientX+gap,top=event.clientY+gap;
+  if(left+rect.width>rightEdge)left=event.clientX-gap-rect.width;
+  if(top+rect.height>bottomEdge)top=event.clientY-gap-rect.height;
+  tooltip.style.left=Math.max(leftEdge,Math.min(left,rightEdge-rect.width))+"px";
+  tooltip.style.top=Math.max(topEdge,Math.min(top,bottomEdge-rect.height))+"px";
 }
 function renderInspector() {
   const c=selectedComponent(),batch=currentBatch();
@@ -301,6 +331,7 @@ function componentContext(event,c) {
   ]);
 }
 function showContext(event,items) {
+  hideComponentTooltip();
   const menu=$("contextMenu");menu.replaceChildren();
   const inFiles=$("filesDialog").open;contextHost=inFiles?$("filesDialog"):document.body;
   contextHost.append(menu);
@@ -336,6 +367,7 @@ function boardPoint(event) {
   return {x:Math.max(0,Math.min(size.w,(event.clientX-rect.left)/state.scale)),y:Math.max(0,Math.min(size.h,(event.clientY-rect.top)/state.scale))};
 }
 function beginBoard(event) {
+  hideComponentTooltip();
   if(event.button===2)return;
   const viewport=$("boardViewport");
   if(event.button===1||state.space){
@@ -393,6 +425,7 @@ function endBoard(event) {
 
 // The built-in file browser delegates operations to the isolated main process.
 async function openBrowser(purpose="browse",side=null,initial=null) {
+  hideComponentTooltip();
   hideContext();browser.purpose=purpose;browser.side=side;browser.selected.clear();browser.anchor=null;$("fileSearch").value="";
   $("filesTitle").textContent=purpose==="image"?"Изображение платы · "+side:purpose==="project"?"Открыть проект":"Проводник";
   $("filesPurpose").textContent=purpose==="image"?"Выберите изображение, затем нажмите «Использовать изображение».":purpose==="project"?"Откройте папку, содержащую project.json.":"Файлы и папки вашего компьютера";
@@ -595,6 +628,9 @@ function connect() {
   },{passive:false});
   $("boardViewport").addEventListener("pointerdown",beginBoard);$("boardViewport").addEventListener("pointermove",moveBoard);
   $("boardViewport").addEventListener("pointerup",endBoard);$("boardViewport").addEventListener("pointercancel",endBoard);
+  $("overlays").addEventListener("pointerover",showComponentTooltip);$("overlays").addEventListener("pointermove",showComponentTooltip);
+  $("overlays").addEventListener("pointerleave",hideComponentTooltip);$("boardViewport").addEventListener("scroll",hideComponentTooltip);
+  window.addEventListener("blur",hideComponentTooltip);
   let boardResizeFrame;
   new ResizeObserver(()=>{
     cancelAnimationFrame(boardResizeFrame);
@@ -640,7 +676,7 @@ function connect() {
 async function keyboard(event) {
   const editable=event.target.matches("input,textarea,select"),ctrl=event.ctrlKey||event.metaKey;
   if($("promptDialog").open)return;
-  if(event.key==="Escape"){hideContext();if(state.drawing){state.drawing=false;render();}return;}
+  if(event.key==="Escape"){hideContext();hideComponentTooltip();if(state.drawing){state.drawing=false;render();}return;}
   if($("filesDialog").open) {
     if((ctrl&&event.key.toLowerCase()==="l")||(event.altKey&&event.key.toLowerCase()==="d")){event.preventDefault();$("fileAddress").focus();$("fileAddress").select();return;}
     if(editable){if(event.key==="F5"){event.preventDefault();await navigateFiles(browser.directory,false);}return;}
