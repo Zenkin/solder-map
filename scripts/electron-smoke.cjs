@@ -60,6 +60,17 @@ app.whenReady().then(async()=>{
     assert.equal(await execute('filtered().length'),6);
     await execute('$("searchInput").value="R2, R8";$("searchInput").dispatchEvent(new Event("input",{bubbles:true}));');
     assert.equal(await execute('filtered().length'),2);
+    // Simulate imported descriptions containing package, power and tolerance numbers.
+    const originalValues=await execute('state.project.components.filter(c=>c.side==="TOP" && c.ref.startsWith("R")).map(c=>[c.ref,c.value])');
+    await command('for(const c of state.project.components.filter(c=>c.side==="TOP" && c.ref.startsWith("R"))){const values={R1:"0.1Вт 0603 1 кОм, 0.1%",R2:"0.1Вт 0603 1000 Ом, 0.1%",R3:"0.1Вт 0603 1.5 кОм, 1%",R4:"49,9 кОм",R5:"0.1Вт 0603 10 кОм, 0.1%",R6:"191 кОм",R7:"90,9 кОм",R8:"1k"};c.value=values[c.ref];}state.tab="components";render();');
+    await execute('$("searchInput").value="1 кОм";$("searchInput").dispatchEvent(new Event("input",{bubbles:true}));');
+    assert.deepEqual(await execute('filtered().map(c=>c.ref)'),["R1","R2","R8"]);
+    assert.equal(await execute('$("componentList").querySelectorAll(".component-row").length'),3);
+    assert.ok((await execute('$("componentList").firstElementChild.textContent')).includes("0.1Вт 0603"));
+    await command('selectComponent(state.project.components.find(c=>c.side==="TOP"&&c.ref==="R1"));sameNominal();');
+    assert.deepEqual(await execute('filtered().map(c=>c.ref)'),["R1","R2","R8"]);
+    assert.ok((await execute('$("selectedNote").textContent')).includes("0.1Вт 0603"));
+    await command('const values='+JSON.stringify(originalValues)+';for(const [ref,value] of values)state.project.components.find(c=>c.side==="TOP"&&c.ref===ref).value=value;clearFilters();');
     await execute('$("resetFilters").click()');
     // Reset applies to both sides even when the visible list hides soldered items.
     await execute('$("searchInput").value="100nf";$("searchInput").dispatchEvent(new Event("input",{bubbles:true}));$("statusFilter").value="pending";$("statusFilter").dispatchEvent(new Event("change",{bubbles:true}));');

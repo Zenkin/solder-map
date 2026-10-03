@@ -26,6 +26,8 @@ TOP and BOTTOM always have separate component lists and batches. Batches group b
 
 The default batch sort uses remaining unsoldered quantity in descending order; total quantity and nominal name are alternate sorts. The context command for a nominal clears other filters and remains on the current side.
 
+Unit-bearing search queries compare electrical nominals exactly before applying any additional text constraints. Explicit resistor/capacitor units are also extracted from compound descriptions containing power, package and tolerance; these metadata numbers cannot substitute for the electrical nominal. Canonical batch keys use the extracted nominal, while stored descriptions and their visible details are preserved. Ambiguous descriptions containing several different electrical values are not guessed.
+
 Pending components are blue; soldered components are green. Selection and batch emphasis use neutral outlines. Stages and groups are filters and metadata, with no color system. Solder marks use explicit reversible commands, with confirmation for a whole batch.
 
 The project-level reset command clears all solder marks on TOP and BOTTOM regardless of active filters, after confirmation. It uses the existing undo/redo and save path, and resets the solder-status filter to show the now-pending components.

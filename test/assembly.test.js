@@ -18,6 +18,8 @@ test("search accepts references, lists, unit variants, type, package and notes",
   assert.ok(!A.matchesSearch(r,"R8; R9"));
   assert.ok(!A.matchesSearch(r,"R1"));
   assert.ok(!A.matchesSearch(r,"22k"));
+  assert.ok(A.matchesSearch(component("U1","LM358"),"LM358"));
+  assert.ok(A.matchesSearch(component("U1","STM32F103"),"STM32"));
 });
 test("side filters and largest remaining batches isolate the assembly sequence",()=>{
   const components=[
@@ -34,6 +36,47 @@ test("side filters and largest remaining batches isolate the assembly sequence",
   assert.equal(A.visible(p,{side:"TOP",nominal,status:"pending"}).length,5);
   assert.equal(A.visible(p,{side:"BOTTOM",nominal}).length,15);
   assert.equal(A.visible(p,{side:"TOP",status:"done"}).length,3);
+});
+test("1 kOhm search excludes unrelated values despite matching reference, power or tolerance digits",()=>{
+  const components=[
+    component("R1","0.1Вт 0603 1 кОм, 0.1%"),
+    component("R2","0.25Вт 0805 1000 Ом, 1%"),
+    component("R5","0.1Вт 0603 1.5 кОм, 1%"),
+    component("R11","49,9 кОм","TOP",{note:"Раньше был 1 кОм"}),
+    component("R12","0.1Вт 0603 10 кОм, 0.1%"),
+    component("R14","191 кОм"),
+    component("R15","90,9 кОм"),
+    component("R1","1k","BOTTOM")
+  ];
+  const p=A.normalizeProject({components});
+  for(const query of ["1 кОм","1k","1k0","1000 Ohms","0.001 МОм","1 kΩ"]){
+    assert.deepEqual(A.visible(p,{side:"TOP",query}).map(c=>c.ref),["R1","R2"],query);
+  }
+  assert.deepEqual(A.visible(p,{side:"TOP",query:"1 кОм 0603"}).map(c=>c.ref),["R1"]);
+  assert.deepEqual(A.visible(p,{side:"TOP",query:"R2 1кОм"}).map(c=>c.ref),["R2"]);
+  assert.deepEqual(A.visible(p,{side:"TOP",query:"1,5 кОм"}).map(c=>c.ref),["R5"]);
+  assert.equal(p.components[0].value,components[0].value);
+});
+test("compound descriptions form the same batches as plain nominals while retaining details",()=>{
+  for(const [ref,descriptions,plain] of [
+    ["R1",["0.1Вт 0603 1 кОм, 0.1%","0603 1 000 Ом ±1%","1k 0805 0.25W","4k7 0603 1%"],["1k","1k","1k","4.7k"]],
+    ["C1",["0603 100 нФ 50В X7R","0.1µF 16V 0603","4n7 50V"],["0.1uF","100nF","4700pF"]]
+  ])descriptions.forEach((description,i)=>{
+    const c=component(ref,description),n=A.nominal(c);
+    assert.equal(n.key,A.nominal(component(ref,plain[i])).key,description);
+    assert.equal(n.description,description);
+    assert.ok(A.matchesSearch(c,plain[i]),description);
+  });
+  const resistor=component("R1","0.1Вт 0603 1 кОм, 0.1%");
+  assert.equal(A.nominal(resistor).label,"1 кОм");
+  assert.ok(!A.matchesSearch(resistor,"0.1 Ом"));
+  assert.ok(!A.matchesSearch(component("R1","Резистор 0603 1%"),"1 Ом"));
+  assert.ok(!A.matchesSearch(component("R1","1 кОм / 10 кОм"),"1 кОм"));
+});
+test("capacitor unit queries use exact values and do not fall back to metadata or digit substrings",()=>{
+  for(const value of ["1 нФ 50В 0603","1000 пФ 16В","0.001uF X7R"])assert.ok(A.matchesSearch(component("C1",value),"1nF"),value);
+  for(const value of ["10 нФ 50В 0603","100 нФ 16В 1%","1uF 0603"])assert.ok(!A.matchesSearch(component("C1",value),"1 нФ"),value);
+  assert.ok(!A.matchesSearch(component("R1","1000 Ом"),"1 нФ"));
 });
 test("opening old projects preserves pixel geometry, images, stages and solder marks while whitelisting fields",()=>{
   const c=component("R1","10k","TOP",{stage:"1",group:"питание",oldPayload:{a:1},unplaced:true});

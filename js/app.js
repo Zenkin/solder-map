@@ -199,7 +199,8 @@ function renderList() {
   } else {
     components.sort((a,b)=>A.natural.compare(a.ref,b.ref)).forEach(c=>{
       const row=button("",()=>selectComponent(c,true),"component-row"+(state.selected===A.key(c)?" active":""));
-      const body=node("span","row-body");body.append(node("strong","",c.ref),node("span","row-meta",A.nominal(c).label));
+      const n=A.nominal(c),body=node("span","row-body");
+      body.append(node("strong","",c.ref),node("span","row-meta",n.description||n.label));
       const done=!!state.project.doneMap[A.key(c)];row.title=(done?"Припаян":"Ожидает пайки")+(c.unplaced?" · область не задана":"");
       row.append(node("i","status-dot"+(done?" done":"")),body);
       row.addEventListener("contextmenu",event=>componentContext(event,c));list.append(row);
@@ -235,7 +236,8 @@ function renderInspector() {
     $("selectedRef").textContent=c.ref;$("selectedNominal").textContent=A.nominal(c).label;
     $("selectedStatus").textContent=done?"✓ Припаян":"● Ожидает пайки";$("selectedStatus").className="status-label"+(done?" done":"");
     $("toggleSolder").textContent=done?"Снять отметку пайки":"Отметить припаянным";
-    $("selectedNote").textContent=c.note||"";$("selectedNote").hidden=!c.note;
+    const details=[A.nominal(c).description,c.note].filter(Boolean).join("\n");
+    $("selectedNote").textContent=details;$("selectedNote").hidden=!details;
     for(const [field,name] of [["editRef","ref"],["editValue","value"],["editType","type"],["editStage","stage"],["editGroup","group"],["editNote","note"]])$(field).value=c[name]||"";
   }
   $("batchActions").hidden=!batch;

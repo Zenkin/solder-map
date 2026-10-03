@@ -8,37 +8,79 @@
   function key(c) { return `${c.side}:${c.ref}`; }
   function text(value) { return String(value ?? "").toLowerCase().replace(/ё/g,"е").replace(/[µμ]/g,"u").replace(/ω/g,"ом").replace(/\s+/g," ").trim(); }
   function kind(c) { return String(c.ref || "").toUpperCase().match(/^[A-Z]+/)?.[0] || ""; }
-  function nominal(c) {
-    const type = kind(c);
-    const raw = text(c.value).replace(/\s+/g, "").replace(/,/g,".");
+  // Explicit units distinguish the electrical value from power, package and tolerance.
+  const resistorValue = /(^|[^\p{L}\p{N}.,])((?:\d{1,3}(?: \d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?|[.,]\d+)\s*(?:[кkmм]\s*(?:ом|ohms?)?|ом|ohms?|r)|\d*[rкkmм]\d+)(?=$|[^\p{L}\p{N}])/gu;
+  const capacitorValue = /(^|[^\p{L}\p{N}.,])((?:\d{1,3}(?: \d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?|[.,]\d+)\s*(?:мкф|uf|нф|nf|пф|pf|мф|mf|u|n|p)|\d*[unp]\d+)(?=$|[^\p{L}\p{N}])/gu;
+  function readNominalToken(input, type, allowBare) {
+    const raw = text(input).replace(/\s+/g,"").replace(/,/g,".");
     let value = null;
     if (type === "R") {
       const embedded = raw.match(/^(\d*)([rкkmм])(\d+)$/);
-      const ordinary = raw.match(/^(\d+(?:\.\d*)?|\.\d+)(r|ом|ohm|к|k|ком|kohm|м|m|мом|mohm)?$/);
-      const scales = {r:1,ом:1,ohm:1,к:1e3,k:1e3,ком:1e3,kohm:1e3,м:1e6,m:1e6,мом:1e6,mohm:1e6};
-      if (embedded) value = Number(`${embedded[1] || 0}.${embedded[3]}`) * scales[embedded[2]];
-      else if (ordinary) value = Number(ordinary[1]) * (scales[ordinary[2]] || 1);
+      const ordinary = raw.match(/^(\d+(?:\.\d*)?|\.\d+)([кk](?:ом|ohms?)?|[мm](?:ом|ohms?)?|ом|ohms?|r)?$/);
+      const scale = unit => /^[кk]/.test(unit) ? 1e3 : /^[мm]/.test(unit) ? 1e6 : 1;
+      if (embedded) value = Number((embedded[1] || "0")+"."+embedded[3]) * scale(embedded[2]);
+      else if (ordinary && (allowBare || ordinary[2])) value = Number(ordinary[1]) * scale(ordinary[2] || "");
     } else if (type === "C") {
-      const match = raw.match(/^(\d+(?:\.\d*)?|\.\d+)(пф|pf|p|нф|nf|n|мкф|uf|u|мф|mf)$/);
       const scales = {пф:1,pf:1,p:1,нф:1e3,nf:1e3,n:1e3,мкф:1e6,uf:1e6,u:1e6,мф:1e9,mf:1e9};
-      if (match) value = Number(match[1]) * scales[match[2]];
+      const ordinary = raw.match(/^(\d+(?:\.\d*)?|\.\d+)(пф|pf|p|нф|nf|n|мкф|uf|u|мф|mf)$/);
+      const embedded = raw.match(/^(\d*)([unp])(\d+)$/);
+      if (ordinary) value = Number(ordinary[1]) * scales[ordinary[2]];
+      else if (embedded) value = Number((embedded[1] || "0")+"."+embedded[3]) * scales[embedded[2]];
     }
+    return value !== null && Number.isFinite(value) ? Number(value.toPrecision(12)) : null;
+  }
+  function findNominal(input, type, allowBare=false) {
+    if (!["R","C"].includes(type)) return null;
+    const raw = text(input), whole = readNominalToken(raw,type,allowBare);
+    if (whole !== null) return {type,value:whole,start:0,end:raw.length,complete:true};
+    const pattern = type === "R" ? resistorValue : capacitorValue;
+    const candidates = [...raw.matchAll(pattern)].map(match => ({
+      type,value:readNominalToken(match[2],type,false),
+      start:match.index+match[1].length,end:match.index+match[0].length,complete:false
+    })).filter(item => item.value !== null);
+    // Do not guess when a description contains several different electrical values.
+    return new Set(candidates.map(item=>item.value)).size === 1 ? candidates[0] : null;
+  }
+  function nominal(c) {
+    const type = kind(c);
+    const raw = text(c.value).replace(/\s+/g, "").replace(/,/g,".");
+    const measurement = findNominal(c.value,type,true);
+    const value = measurement?.value ?? null;
     let label = String(c.value || "").trim() || "Без номинала";
     if (value !== null && Number.isFinite(value)) {
       const choices = type === "R" ? [[1e6,"МОм"],[1e3,"кОм"],[1,"Ом"]] : [[1e9,"мФ"],[1e6,"мкФ"],[1e3,"нФ"],[1,"пФ"]];
       const [scale, unit] = choices.find(([s]) => value >= s) || choices.at(-1);
       label = `${Number((value / scale).toPrecision(12)).toLocaleString("ru-RU", {maximumFractionDigits:9})} ${unit}`;
     }
-    return {key:`${type}:${value === null ? raw : Number(value.toPrecision(12))}`, label, type, typeLabel:types[type] || type || "Компоненты"};
+    return {key:`${type}:${value === null ? raw : value}`, label, type, typeLabel:types[type] || type || "Компоненты",
+      measurement,description:measurement&&!measurement.complete?String(c.value).trim():""};
   }
   function matchesSearch(c, query) {
     const q = text(query);
     if (!q) return true;
     const tokens = q.split(/[\s,;]+/).filter(Boolean);
     const ref = text(c.ref);
-    if (tokens.every(t => /^[a-z]+\d+$/i.test(t))) return tokens.some(t => ref === t);
+    const isReference = token => {
+      const match=token.match(/^([a-z]+)\d+$/);
+      return !!match && (!!types[match[1].toUpperCase()] || ["T","B",kind(c)].includes(match[1].toUpperCase()));
+    };
+    if (tokens.every(isReference)) return tokens.some(t => ref === t);
     const n = nominal(c);
     const haystack = text(`${c.ref} ${c.value} ${n.label} ${n.typeLabel} ${c.type || ""} ${c.group || ""} ${c.note || ""}`);
+    // A reference such as R2 in a combined query is not the resistor notation 0R2.
+    const references = tokens.filter(isReference);
+    const nominalQuery = text(q.replace(/(^|[\s,;])([a-z]+\d+)(?=$|[\s,;])/g,(match,separator,reference)=>isReference(reference)?separator:match));
+    const electrical = [findNominal(nominalQuery,"R"),findNominal(nominalQuery,"C")].filter(Boolean);
+    if (electrical.length) {
+      if (electrical.length !== 1) return false;
+      if (references.length && !references.includes(ref)) return false;
+      const requested = electrical[0];
+      if (["R","C"].includes(n.type) && n.type !== requested.type) return false;
+      const actual = n.measurement || findNominal(c.value,requested.type);
+      if (!actual || actual.type !== requested.type || actual.value !== requested.value) return false;
+      const remainder = (nominalQuery.slice(0,requested.start)+" "+nominalQuery.slice(requested.end)).split(/[\s,;]+/).filter(Boolean);
+      return remainder.every(token => haystack.includes(token));
+    }
     const compact = haystack.replace(/\s+/g, "");
     if (compact.includes(q.replace(/\s+/g,""))) return true;
     const queryNominal = nominal({...c, value:q});
