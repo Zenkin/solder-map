@@ -6,7 +6,8 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "check": "node --check main.js && node --check preload.js && node --check js/verification.js && node --check js/matching-geometry.js && node --check js/automatic-matching.js && node --check js/matching-session.js && node --check js/matching-format.js && node --check js/pick-and-place.js && node --check js/recognition-import.js && node --check js/matching-resolution.js && node --check js/matching-view.js && node --check js/matching-calibration.js && node --check js/matching-application.js && node --check js/matching-workflow.js && node --check js/report.js && node --check js/bom.js && node --check js/app.js && node --test",
+    "check": "node --check main.js && node --check preload.js && node --check js/file-operations.js && node --check js/assembly.js && node --check js/app.js && node --test",
+    "test:electron": "electron scripts/electron-smoke.cjs",
     "build": "electron-builder --win",
     "build:linux": "electron-builder --linux",
     "build:linux:appimage": "electron-builder --linux AppImage",
@@ -24,8 +25,7 @@
       "preload.js",
       "css/**/*",
       "js/**/*",
-      "assets/**/*",
-      "projects/default-project/**/*"
+      "assets/**/*"
     ],
     "win": {
       "icon": "assets/app-icon.ico",

@@ -1,502 +1,212 @@
-const {app, BrowserWindow, Menu, dialog, ipcMain} = require("electron");
-const path = require("path");
-const fs = require("fs/promises");
-const {pathToFileURL} = require("url");
-const report = require("./js/report.js");
+const {app, BrowserWindow, Menu, dialog, ipcMain, shell} = require("electron");
+const fs = require("node:fs/promises");
+const path = require("node:path");
+const {pathToFileURL} = require("node:url");
+const {childPath, availablePath, isWithin, transfer} = require("./js/file-operations.js");
+const imageExtensions = new Set([".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"]);
+const projects = new Set(), listedItems = new Set(), listedDirectories = new Set(), writeQueues = new Map();
+let window;
+const storePath = () => process.env.SOLDERMAP_PROJECTS_ROOT || path.join(app.getPath("documents"), "SolderMap Projects");
+if (process.env.SOLDERMAP_PROJECTS_ROOT) app.setPath("userData", path.join(storePath(), ".app-data"));
+const norm = p => process.platform === "win32" ? path.resolve(p).toLowerCase() : path.resolve(p);
+const grantProject = p => { projects.add(norm(p)); return p; };
 
-const PROJECT_FILE = "project.json";
-const PROJECTS_ROOT_NAME = "SolderMap Projects";
-const MAX_PROJECT_NAME = 40;
-const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"]);
-const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"]);
-const REPORT_FORMATS = Object.freeze({
-  csv:{extension:"csv", label:"CSV", filter:"CSV"},
-  xlsx:{extension:"xlsx", label:"Excel", filter:"Excel"},
-  pdf:{extension:"pdf", label:"PDF", filter:"PDF"}
-});
-const MAX_REPORT_ROWS = 100000;
-const MAX_REPORT_CELL_LENGTH = 200000;
-const MAX_REPORT_TOTAL_LENGTH = 25000000;
-const MAX_BOM_FILE_SIZE = 10 * 1024 * 1024;
-const MAX_MATCHING_SESSION_FILE_SIZE = 10 * 1024 * 1024;
-const MATCHING_SOURCE_DIALOGS = Object.freeze({
-  placement:{
-    title:"Выберите Pick and Place",
-    buttonLabel:"Открыть Pick and Place",
-    filters:[
-      {name:"Pick and Place", extensions:["csv", "tsv", "txt"]},
-      {name:"Все файлы", extensions:["*"]}
-    ]
-  },
-  recognition:{
-    title:"Выберите результаты распознавания",
-    buttonLabel:"Открыть результаты",
-    filters:[
-      {name:"Результаты распознавания", extensions:["json", "csv", "tsv", "txt"]},
-      {name:"Все файлы", extensions:["*"]}
-    ]
-  }
-});
-
-function projectStorePath() {
-  return path.join(app.getPath("documents"), PROJECTS_ROOT_NAME);
+async function projectPath(value) {
+  const target = await fs.realpath(String(value));
+  if (!projects.has(norm(target))) throw new Error("Сначала откройте проект.");
+  return target;
 }
-
-function sanitizeFolderName(name) {
-  return String(name || "New Project")
-    .trim()
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "-")
-    .replace(/\s+/g, " ")
-    .slice(0, MAX_PROJECT_NAME) || "New Project";
+async function knownItem(value) {
+  const target = path.resolve(String(value));
+  if (!listedItems.has(norm(target))) throw new Error("Сначала откройте папку в проводнике.");
+  if ((await fs.lstat(target)).isSymbolicLink()) throw new Error("Откройте ссылку в системном проводнике.");
+  return target;
 }
-
-function sanitizeReportFileName(name) {
-  return String(name || "PCB project")
-    .trim()
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "-")
-    .replace(/\s+/g, " ")
-    .slice(0, 80) || "PCB project";
+async function knownDirectory(value) {
+  const target = await fs.realpath(String(value));
+  if (!listedDirectories.has(norm(target))) throw new Error("Сначала откройте папку назначения.");
+  return target;
 }
-
-function normalizeReportRows(value) {
-  if (!Array.isArray(value) || value.length > MAX_REPORT_ROWS) {
-    throw new Error("Invalid report rows.");
-  }
-  let totalLength = 0;
-  return value.map(row => Object.fromEntries(
-    report.COLUMNS.map(column => {
-      const cell = String(row?.[column.key] ?? "");
-      if (cell.length > MAX_REPORT_CELL_LENGTH) throw new Error("Report cell is too large.");
-      totalLength += cell.length;
-      if (totalLength > MAX_REPORT_TOTAL_LENGTH) throw new Error("Report data is too large.");
-      return [column.key, cell];
-    })
-  ));
-}
-
-function escapeReportHtml(value) {
-  return String(value ?? "").replace(/[&<>"']/g, character => ({
-    "&":"&amp;",
-    "<":"&lt;",
-    ">":"&gt;",
-    "\"":"&quot;",
-    "'":"&#039;"
-  })[character]);
-}
-
-function reportHtml(projectName, generatedAt, rows) {
-  const headers = report.COLUMNS.map(column => `<th>${escapeReportHtml(column.label)}</th>`).join("");
-  const body = rows.map(row => `<tr>${report.COLUMNS.map(column => (
-    `<td>${escapeReportHtml(row[column.key])}</td>`
-  )).join("")}</tr>`).join("");
-  const dateText = new Intl.DateTimeFormat("ru-RU", {
-    dateStyle:"long",
-    timeStyle:"short"
-  }).format(generatedAt);
-  return `<!doctype html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<title>${escapeReportHtml(projectName)} — проверка компонентов</title>
-<style>
-  @page { size:A4 landscape; margin:14mm 8mm 15mm; }
-  * { box-sizing:border-box; }
-  body { margin:0; color:#111827; font-family:Arial,sans-serif; font-size:8px; }
-  h1 { margin:0 0 3mm; font-size:16px; }
-  .meta { margin:0 0 4mm; color:#475467; font-size:9px; }
-  table { width:100%; border-collapse:collapse; table-layout:fixed; }
-  thead { display:table-header-group; }
-  tr { break-inside:avoid; page-break-inside:avoid; }
-  th,td { padding:2mm 1.3mm; border:0.25mm solid #9aa4b2; text-align:left; vertical-align:top; overflow-wrap:anywhere; }
-  th { background:#e8edf3; font-size:7px; }
-  th:nth-child(1),td:nth-child(1) { width:8%; }
-  th:nth-child(2),td:nth-child(2) { width:8%; }
-  th:nth-child(3),td:nth-child(3) { width:9%; }
-  th:nth-child(4),td:nth-child(4) { width:6%; }
-  th:nth-child(5),td:nth-child(5) { width:9%; }
-  th:nth-child(6),td:nth-child(6) { width:10%; }
-  th:nth-child(7),td:nth-child(7) { width:9%; }
-  th:nth-child(8),td:nth-child(8) { width:12%; }
-  th:nth-child(9),td:nth-child(9) { width:8%; }
-  th:nth-child(10),td:nth-child(10) { width:10%; }
-  th:nth-child(11),td:nth-child(11) { width:11%; }
-</style>
-</head>
-<body>
-  <h1>Отчёт о проверке компонентов — ${escapeReportHtml(projectName)}</h1>
-  <div class="meta">Сформирован: ${escapeReportHtml(dateText)} · Компонентов: ${rows.length}</div>
-  <table><thead><tr>${headers}</tr></thead><tbody>${body}</tbody></table>
-</body>
-</html>`;
-}
-
-async function createExcelReport(rows, projectName, generatedAt) {
-  return report.toXlsxBuffer(rows, {projectName, generatedAt});
-}
-
-async function createPdfReport(rows, projectName, generatedAt) {
-  const temporaryFolder = await fs.mkdtemp(path.join(app.getPath("temp"), "soldermap-report-"));
-  const htmlPath = path.join(temporaryFolder, "report.html");
-  let reportWindow = null;
-  try {
-    reportWindow = new BrowserWindow({
-      show:false,
-      webPreferences:{
-        contextIsolation:true,
-        nodeIntegration:false,
-        sandbox:true
-      }
-    });
-    const html = reportHtml(projectName, generatedAt, rows);
-    await fs.writeFile(htmlPath, html, "utf8");
-    await reportWindow.loadFile(htmlPath);
-    return await reportWindow.webContents.printToPDF({
-      pageSize:"A4",
-      landscape:true,
-      printBackground:true,
-      displayHeaderFooter:true,
-      headerTemplate:"<div></div>",
-      footerTemplate:"<div style=\"width:100%;padding:0 8mm;color:#667085;font:8px Arial;text-align:right\"><span class=\"pageNumber\"></span> / <span class=\"totalPages\"></span></div>",
-      preferCSSPageSize:true,
-      margins:{top:0.55, bottom:0.59, left:0.31, right:0.31}
-    });
-  } finally {
-    if (reportWindow && !reportWindow.isDestroyed()) reportWindow.destroy();
-    await fs.rm(temporaryFolder, {recursive:true, force:true});
-  }
-}
-
-async function uniqueProjectFolder(rootPath, name) {
-  const base = sanitizeFolderName(name);
-  let folderPath = path.join(rootPath, base);
-  let index = 2;
-  while (true) {
-    try {
-      await fs.access(folderPath);
-      folderPath = path.join(rootPath, `${base} ${index++}`);
-    } catch {
-      return folderPath;
-    }
-  }
-}
-
-function createWindow() {
-  const win = new BrowserWindow({
-    width: 1440,
-    height: 920,
-    minWidth: 980,
-    minHeight: 680,
-    frame: false,
-    icon: path.join(__dirname, "assets", "app-icon.ico"),
-    backgroundColor: "#eef2f5",
-    webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false
-    }
+function handle(channel, callback) {
+  ipcMain.handle(channel, (event, ...args) => {
+    if (event.sender !== window?.webContents) throw new Error("Недоступный отправитель.");
+    return callback(...args);
   });
-
-  win.loadFile(path.join(__dirname, "index.html"));
 }
-
+function createWindow() {
+  window = new BrowserWindow({
+    width:1460, height:960, minWidth:980, minHeight:680, frame:false, backgroundColor:"#f3f5f8",
+    icon:path.join(__dirname, "assets/app-icon.png"),
+    webPreferences:{preload:path.join(__dirname, "preload.js"), contextIsolation:true, nodeIntegration:false}
+  });
+  window.webContents.setWindowOpenHandler(() => ({action:"deny"}));
+  window.webContents.on("will-navigate", event => event.preventDefault());
+  window.loadFile(path.join(__dirname,"index.html"));
+  let closing = false;
+  window.on("close", event => {
+    if (!closing) { event.preventDefault(); window.webContents.send("window:request-close"); }
+  });
+  ipcMain.removeAllListeners("window:close-ready");
+  ipcMain.on("window:close-ready", async event => {
+    if (event.sender !== window?.webContents) return;
+    await Promise.allSettled([...writeQueues.values()]);
+    closing = true;
+    window.close();
+  });
+}
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   createWindow();
-
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
+  app.on("activate", () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });
+});
+app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
+ipcMain.on("window:minimize", event => { if (event.sender === window?.webContents) window.minimize(); });
+ipcMain.on("window:maximize", event => {
+  if (event.sender === window?.webContents) window.isMaximized() ? window.unmaximize() : window.maximize();
 });
 
-ipcMain.on("window:minimize", event => {
-  BrowserWindow.fromWebContents(event.sender)?.minimize();
-});
-
-ipcMain.on("window:toggle-maximize", event => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win) return;
-  if (win.isMaximized()) win.unmaximize();
-  else win.maximize();
-});
-
-ipcMain.on("window:close", event => {
-  BrowserWindow.fromWebContents(event.sender)?.close();
-});
-
-ipcMain.handle("report:export", async (event, payload) => {
-  const format = String(payload?.format || "");
-  const formatInfo = REPORT_FORMATS[format];
-  if (!formatInfo) throw new Error("Unsupported report format.");
-
-  const projectName = sanitizeReportFileName(payload?.projectName);
-  const rows = normalizeReportRows(payload?.rows);
-  const generatedAt = new Date();
-  const datePart = generatedAt.toISOString().slice(0, 10);
-  const defaultName = `${projectName} - проверка компонентов - ${datePart}.${formatInfo.extension}`;
-  const parentWindow = BrowserWindow.fromWebContents(event.sender);
-  const dialogOptions = {
-    title:`Экспорт отчёта ${formatInfo.label}`,
-    defaultPath:defaultName,
-    buttonLabel:"Сохранить",
-    filters:[{name:formatInfo.filter, extensions:[formatInfo.extension]}],
-    properties:["showOverwriteConfirmation"]
-  };
-  const result = parentWindow
-    ? await dialog.showSaveDialog(parentWindow, dialogOptions)
-    : await dialog.showSaveDialog(dialogOptions);
-  if (result.canceled || !result.filePath) return {canceled:true};
-
-  let content;
-  if (format === "csv") content = report.toCsv(rows);
-  if (format === "xlsx") content = await createExcelReport(rows, projectName, generatedAt);
-  if (format === "pdf") content = await createPdfReport(rows, projectName, generatedAt);
-  await fs.writeFile(result.filePath, content);
-  return {canceled:false, filePath:result.filePath};
-});
-
-ipcMain.handle("bom:select-file", async event => {
-  const parentWindow = BrowserWindow.fromWebContents(event.sender);
-  const options = {
-    title:"Выберите BOM",
-    buttonLabel:"Открыть BOM",
-    properties:["openFile"],
-    filters:[
-      {name:"Таблицы BOM", extensions:["csv", "tsv", "txt"]},
-      {name:"Все файлы", extensions:["*"]}
-    ]
-  };
-  const result = parentWindow
-    ? await dialog.showOpenDialog(parentWindow, options)
-    : await dialog.showOpenDialog(options);
-  if (result.canceled || !result.filePaths[0]) return null;
-  const filePath = result.filePaths[0];
-  const stat = await fs.stat(filePath);
-  if (!stat.isFile() || stat.size > MAX_BOM_FILE_SIZE) {
-    throw new Error("BOM file is too large or is not a regular file.");
-  }
-  return {
-    name:path.basename(filePath),
-    text:await fs.readFile(filePath, "utf8")
-  };
-});
-
-ipcMain.handle("matching:select-file", async event => {
-  const parentWindow = BrowserWindow.fromWebContents(event.sender);
-  const options = {
-    title:"Выберите сеанс автоматического сопоставления",
-    buttonLabel:"Открыть сеанс",
-    properties:["openFile"],
-    filters:[
-      {name:"Сеанс сопоставления", extensions:["json"]},
-      {name:"Все файлы", extensions:["*"]}
-    ]
-  };
-  const result = parentWindow
-    ? await dialog.showOpenDialog(parentWindow, options)
-    : await dialog.showOpenDialog(options);
-  if (result.canceled || !result.filePaths[0]) return null;
-  const filePath = result.filePaths[0];
-  const stat = await fs.stat(filePath);
-  if (!stat.isFile() || stat.size > MAX_MATCHING_SESSION_FILE_SIZE) {
-    throw new Error("Matching session file is too large or is not a regular file.");
-  }
-  return {
-    name:path.basename(filePath),
-    text:await fs.readFile(filePath, "utf8")
-  };
-});
-
-ipcMain.handle("matching:select-source-file", async (event, kind) => {
-  const sourceKind = String(kind ?? "");
-  const dialogOptions = MATCHING_SOURCE_DIALOGS[sourceKind];
-  if (!dialogOptions) throw new Error("Unsupported matching source kind.");
-  const parentWindow = BrowserWindow.fromWebContents(event.sender);
-  const options = {
-    ...dialogOptions,
-    properties:["openFile"]
-  };
-  const result = parentWindow
-    ? await dialog.showOpenDialog(parentWindow, options)
-    : await dialog.showOpenDialog(options);
-  if (result.canceled || !result.filePaths[0]) return null;
-  const filePath = result.filePaths[0];
-  const stat = await fs.stat(filePath);
-  if (!stat.isFile() || stat.size > MAX_MATCHING_SESSION_FILE_SIZE) {
-    throw new Error("Matching source file is too large or is not a regular file.");
-  }
-  return {
-    name:path.basename(filePath),
-    text:await fs.readFile(filePath, "utf8")
-  };
-});
-
-ipcMain.handle("projects:list", async () => {
-  const rootPath = projectStorePath();
-  await fs.mkdir(rootPath, {recursive: true});
-  const entries = await fs.readdir(rootPath, {withFileTypes: true});
-  const projects = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const folderPath = path.join(rootPath, entry.name);
-    const projectPath = path.join(folderPath, PROJECT_FILE);
+handle("projects:list", async () => {
+  const root = storePath();
+  await fs.mkdir(root, {recursive:true});
+  const result = [];
+  for (const entry of await fs.readdir(root, {withFileTypes:true})) {
+    if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+    const folder = path.join(root, entry.name);
     try {
-      const [content, stat] = await Promise.all([
-        fs.readFile(projectPath, "utf8"),
-        fs.stat(projectPath)
-      ]);
-      const data = JSON.parse(content);
-      projects.push({
-        path: folderPath,
-        name: data?.name || entry.name,
-        folderName: entry.name,
-        updatedAt: stat.mtimeMs
-      });
-    } catch {
-      projects.push({
-        path: folderPath,
-        name: entry.name,
-        folderName: entry.name,
-        updatedAt: 0,
-        empty: true
-      });
-    }
+      const data = JSON.parse((await fs.readFile(path.join(folder, "project.json"), "utf8")).replace(/^\uFEFF/,""));
+      const stat = await fs.stat(path.join(folder, "project.json"));
+      result.push({path:grantProject(await fs.realpath(folder)), name:String(data.name || entry.name), updatedAt:stat.mtimeMs});
+    } catch { /* Incomplete folders are available in the file browser. */ }
   }
-  return {
-    rootPath,
-    projects: projects.sort((a, b) => b.updatedAt - a.updatedAt || a.name.localeCompare(b.name))
-  };
+  return result.sort((a,b) => b.updatedAt-a.updatedAt);
 });
-
-ipcMain.handle("projects:create", async (_event, name) => {
-  const rootPath = projectStorePath();
-  await fs.mkdir(rootPath, {recursive: true});
-  const folderPath = await uniqueProjectFolder(rootPath, name);
-  await fs.mkdir(folderPath, {recursive: true});
-  return {
-    path: folderPath,
-    name: path.basename(folderPath)
-  };
+handle("projects:create", async name => {
+  await fs.mkdir(storePath(), {recursive:true});
+  const safe = String(name || "Новый проект").trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "-").slice(0,80).replace(/[. ]+$/, "") || "Новый проект";
+  const target = await availablePath(storePath(), safe);
+  await fs.mkdir(target);
+  return {path:grantProject(await fs.realpath(target)), name:safe};
 });
-
-ipcMain.handle("projects:delete", async (_event, folderPath) => {
-  const rootPath = path.resolve(projectStorePath());
-  const targetPath = path.resolve(String(folderPath || ""));
-  const relativePath = path.relative(rootPath, targetPath);
-  if (!targetPath || relativePath.startsWith("..") || path.isAbsolute(relativePath) || relativePath === "") {
-    throw new Error("Project path is outside the projects folder.");
-  }
-  await fs.rm(targetPath, {recursive: true, force: true});
-  return {ok: true};
+handle("project:read", async value => {
+  const folder = await fs.realpath(String(value));
+  if (!projects.has(norm(folder)) && !listedDirectories.has(norm(folder))) throw new Error("Откройте папку проекта в проводнике.");
+  const data = JSON.parse((await fs.readFile(path.join(folder,"project.json"),"utf8")).replace(/^\uFEFF/,""));
+  grantProject(folder);
+  return data;
 });
-
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
-
-ipcMain.handle("project:select-directory", async () => {
-  const result = await dialog.showOpenDialog({
-    properties: ["openDirectory", "createDirectory"]
-  });
-  if (result.canceled || !result.filePaths[0]) return null;
-
-  const folderPath = result.filePaths[0];
-  return {
-    path: folderPath,
-    name: path.basename(folderPath)
-  };
-});
-
-ipcMain.handle("project:read", async (_event, folderPath) => {
-  const content = await fs.readFile(path.join(folderPath, PROJECT_FILE), "utf8");
-  return JSON.parse(content);
-});
-
-ipcMain.handle("project:write", async (_event, folderPath, project) => {
-  await fs.mkdir(folderPath, {recursive: true});
-  await fs.writeFile(path.join(folderPath, PROJECT_FILE), JSON.stringify(project, null, 2), "utf8");
-});
-
-ipcMain.handle("project:save-image", async (_event, folderPath, fileName, bytes) => {
-  await fs.mkdir(folderPath, {recursive: true});
-  await fs.writeFile(path.join(folderPath, fileName), Buffer.from(bytes));
-});
-
-ipcMain.handle("project:image-url", async (_event, folderPath, fileName) => {
-  const imagePath = path.join(folderPath, fileName);
-  const stat = await fs.stat(imagePath);
-  return `${pathToFileURL(imagePath).href}?v=${Math.round(stat.mtimeMs)}`;
-});
-
-ipcMain.handle("project:copy-image", async (_event, folderPath, sourcePath, fileName) => {
-  await fs.mkdir(folderPath, {recursive: true});
-  await fs.copyFile(sourcePath, path.join(folderPath, fileName));
-});
-
-ipcMain.handle("file-browser:places", async () => {
-  const homePath = app.getPath("home");
-  const candidates = [
-    {name:"Изображения", path:app.getPath("pictures")},
-    {name:"Рабочий стол", path:app.getPath("desktop")},
-    {name:"Загрузки", path:app.getPath("downloads")},
-    {name:"Документы", path:app.getPath("documents")},
-    {name:"Пользователь", path:homePath},
-    {name:"Yandex.Disk", path:path.join(homePath, "Yandex.Disk")},
-    {name:"Проекты", path:projectStorePath()}
-  ];
-  const places = [];
-  for (const item of candidates) {
+handle("project:write", async (value, project) => {
+  const folder = await projectPath(value), json = JSON.stringify(project,null,2);
+  if (json.length > 50*1024*1024) throw new Error("Проект слишком большой.");
+  const previous = writeQueues.get(folder) || Promise.resolve();
+  const next = previous.catch(() => {}).then(async () => {
+    const temporary = path.join(folder, `.project-${Date.now()}-${Math.random().toString(16).slice(2)}.tmp`);
     try {
-      await fs.access(item.path);
-      places.push(item);
-    } catch {
-      // skip unavailable well-known folders
-    }
-  }
-  return places;
+      await fs.writeFile(temporary, json, {encoding:"utf8", flag:"wx"});
+      await fs.rename(temporary, path.join(folder,"project.json"));
+    } finally { await fs.unlink(temporary).catch(() => {}); }
+  });
+  writeQueues.set(folder,next);
+  try { await next; }
+  finally { if (writeQueues.get(folder) === next) writeQueues.delete(folder); }
 });
-
-ipcMain.handle("file-browser:list", async (_event, folderPath) => {
-  const entries = await fs.readdir(folderPath, {withFileTypes: true});
-  const parentPath = path.dirname(folderPath);
-  let hasProject = false;
-  try {
-    await fs.access(path.join(folderPath, PROJECT_FILE));
-    hasProject = true;
-  } catch {
-    hasProject = false;
+handle("project:image-url", async (value, name) => {
+  const folder = await projectPath(value);
+  const target = await fs.realpath(childPath(folder,name));
+  if (!isWithin(folder,target) || !imageExtensions.has(path.extname(target).toLowerCase())) throw new Error("Недоступное изображение.");
+  const stat = await fs.stat(target);
+  return `${pathToFileURL(target).href}?v=${stat.mtimeMs}`;
+});
+handle("project:copy-image", async (value, source, side) => {
+  const folder = await projectPath(value), from = await knownItem(source);
+  const ext = path.extname(from).toLowerCase();
+  if (!["TOP","BOTTOM"].includes(side) || !imageExtensions.has(ext)) throw new Error("Выберите изображение платы.");
+  // A new unique name also avoids following pre-existing links and stale image caches.
+  const target = await availablePath(folder, `${side.toLowerCase()}${ext}`);
+  await fs.copyFile(from,target, require("node:fs").constants.COPYFILE_EXCL);
+  return {file:path.basename(target), originalName:path.basename(from), url:pathToFileURL(target).href};
+});
+handle("files:places", async () => {
+  await fs.mkdir(storePath(),{recursive:true});
+  const places = [{name:"Проекты SolderMap",path:storePath()}];
+  for (const [name,key] of [["Изображения","pictures"],["Рабочий стол","desktop"],["Загрузки","downloads"],["Документы","documents"],["Домашняя папка","home"]]) {
+    try { places.push({name,path:app.getPath(key)}); } catch {}
   }
+  if (process.platform === "win32") {
+    for (let n=65;n<=90;n++) {
+      const drive = String.fromCharCode(n)+":\\";
+      try { await fs.access(drive); places.push({name:"Диск "+drive,path:drive}); } catch {}
+    }
+  } else places.push({name:"Файловая система",path:"/"});
+  const existing = [];
+  for (const place of places) { try { await fs.access(place.path); existing.push(place); } catch {} }
+  return existing;
+});
+handle("files:choose-directory", async () => {
+  const result = await dialog.showOpenDialog(window,{title:"Выберите папку",properties:["openDirectory","createDirectory"]});
+  return result.canceled ? null : result.filePaths[0];
+});
+handle("files:list", async (value, hidden=false) => {
+  const directory = await fs.realpath(String(value));
+  if (!(await fs.stat(directory)).isDirectory()) throw new Error("Это не папка.");
+  listedDirectories.add(norm(directory));
   const items = [];
-  for (const entry of entries) {
-    if (entry.name.startsWith(".")) continue;
-    const fullPath = path.join(folderPath, entry.name);
-    if (entry.isDirectory()) {
-      let folderHasProject = false;
-      try {
-        await fs.access(path.join(fullPath, PROJECT_FILE));
-        folderHasProject = true;
-      } catch {
-        folderHasProject = false;
-      }
-      const stat = await fs.stat(fullPath);
-      items.push({type:"folder", name:entry.name, path:fullPath, hasProject:folderHasProject, modifiedAt:stat.mtimeMs});
-      continue;
-    }
-    const ext = path.extname(entry.name).toLowerCase();
-    if (entry.isFile() && (IMAGE_EXTENSIONS.has(ext) || VIDEO_EXTENSIONS.has(ext))) {
-      const stat = await fs.stat(fullPath);
-      items.push({
-        type:IMAGE_EXTENSIONS.has(ext) ? "image" : "video",
-        name:entry.name,
-        path:fullPath,
-        url:IMAGE_EXTENSIONS.has(ext) ? pathToFileURL(fullPath).href : "",
-        modifiedAt:stat.mtimeMs
-      });
-    }
+  for (const entry of await fs.readdir(directory,{withFileTypes:true})) {
+    if (!hidden && entry.name.startsWith(".")) continue;
+    const target = path.join(directory,entry.name);
+    try {
+      const stat = await fs.lstat(target), ext=path.extname(target).toLowerCase();
+      const type = stat.isDirectory() ? "folder" : imageExtensions.has(ext) ? "image" : "file";
+      listedItems.add(norm(target));
+      items.push({name:entry.name,path:target,type,size:stat.size,modifiedAt:stat.mtimeMs,link:stat.isSymbolicLink(),url:type==="image"?pathToFileURL(target).href:null});
+    } catch { /* An entry can disappear while reading. */ }
   }
-  return {
-    path:folderPath,
-    parentPath:parentPath !== folderPath ? parentPath : "",
-    hasProject,
-    items:items.sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name))
-  };
+  const parent = path.dirname(directory);
+  return {path:directory,parentPath:parent===directory?null:parent,hasProject:items.some(item=>item.name==="project.json"),items};
+});
+handle("files:new-folder", async (value,name) => {
+  const folder=await knownDirectory(value),target=childPath(folder,name);
+  await fs.mkdir(target); return target;
+});
+handle("files:rename", async (value,name) => {
+  const from=await knownItem(value),target=childPath(path.dirname(from),name);
+  if (from===target) return target;
+  if (norm(from)!==norm(target)) {
+    try { await fs.lstat(target); throw new Error("Такое имя уже занято."); }
+    catch(e) { if(e.code!=="ENOENT")throw e; }
+  }
+  await fs.rename(from,target);
+  listedItems.delete(norm(from));
+  return target;
+});
+handle("files:transfer", async (values,destination,mode) => {
+  if (!Array.isArray(values) || !values.length || values.length>1000) throw new Error("Выберите файлы.");
+  const directory=await knownDirectory(destination),result={paths:[],transfers:[],errors:[]};
+  for (const value of values) {
+    try {
+      const target=await transfer(await knownItem(value),directory,mode);
+      result.paths.push(target);result.transfers.push({source:value,target});
+    }
+    catch(e) { result.errors.push({path:value,message:e.message}); }
+  }
+  return result;
+});
+handle("files:trash", async values => {
+  if (!Array.isArray(values) || !values.length || values.length>1000) throw new Error("Выберите файлы.");
+  const result={paths:[],errors:[]};
+  for (const value of values) {
+    try {
+      const target=await knownItem(value);
+      if (projects.has(norm(await fs.realpath(target)))) await (writeQueues.get(target) || Promise.resolve());
+      await shell.trashItem(target); listedItems.delete(norm(target)); result.paths.push(target);
+    } catch(e) { result.errors.push({path:value,message:e.message}); }
+  }
+  return result;
+});
+handle("files:open", async value => {
+  const error=await shell.openPath(await knownItem(value));
+  if(error)throw new Error(error);
+});
+handle("files:show-system", async value => {
+  const error=await shell.openPath(await knownDirectory(value));
+  if(error)throw new Error(error);
 });

@@ -1,436 +1,103 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="ru">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SolderMap</title>
-<link rel="stylesheet" href="css/styles.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'">
+  <title>SolderMap</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <script defer src="js/assembly.js"></script>
+  <script defer src="js/app.js"></script>
 </head>
 <body>
-<div class="appTitlebar">
-  <div class="windowTraffic" aria-hidden="true">
-    <span class="trafficDot closeDot"></span>
-    <span class="trafficDot minimizeDot"></span>
-    <span class="trafficDot maximizeDot"></span>
-  </div>
-  <div class="appTitle">
-    <span class="appTitleMark"></span>
-    <span>SolderMap</span>
-  </div>
-  <div class="windowActions">
-    <button id="windowMinimizeBtn" type="button" aria-label="Свернуть">-</button>
-    <button id="windowMaximizeBtn" type="button" aria-label="Развернуть">□</button>
-    <button id="windowCloseBtn" type="button" aria-label="Закрыть">×</button>
-  </div>
-</div>
-<section class="projectGate" id="projectGate">
-  <div class="projectGatePanel">
-    <p>Выберите проект или создайте новый. Все файлы проекта сохраняются автоматически.</p>
-    <div class="projectCreate">
-      <input id="newProjectName" autocomplete="off" placeholder="Название нового проекта">
-      <button id="startNewProjectBtn" type="button">Создать</button>
+  <header class="titlebar">
+    <div class="brand"><img src="assets/app-icon.svg" alt="">SolderMap <span>карта пайки</span></div>
+    <div class="window-buttons">
+      <button id="windowMin" title="Свернуть" aria-label="Свернуть">−</button>
+      <button id="windowMax" title="Развернуть" aria-label="Развернуть">□</button>
+      <button id="windowClose" title="Закрыть" aria-label="Закрыть">×</button>
     </div>
-    <div class="projectShelf" id="projectList"></div>
-    <div class="projectRootPath" id="projectRootPath"></div>
-    <div class="projectGateActions">
-      <button id="startOpenProjectBtn" type="button">Открыть другую папку</button>
-    </div>
-  </div>
-</section>
-
-<header>
-  <h1>SolderMap</h1>
-  <div class="sub">Проект хранится в папке: project.json, TOP/BOTTOM изображения, компоненты, группы и прогресс пайки.</div>
-</header>
-<div class="modeBar">
-  <div>
-    <b id="modeTitle">Редактор проекта</b>
-    <div id="modeHint">Выберите изображения, расставьте элементы и заполните поля.</div>
-  </div>
-  <div class="modeActions">
-    <button id="backToProjectsBtn" type="button">Проекты</button>
-    <button id="backToEditorBtn" class="solderOnly" type="button">Вернуться в редактор</button>
-    <button id="saveGoSolderBtn" class="editorOnly" type="button">Перейти к пайке</button>
-  </div>
-</div>
-
-<div class="main">
-  <div class="viewer">
-    <div class="tabs">
-    <button id="btnTop" class="active">TOP</button>
-    <button id="btnBottom">BOTTOM</button>
-      <button id="resetBtn" class="editorOnly">Снять выбор</button>
-      <button id="markModeBtn" class="editorOnly" type="button">Добавить элементы</button>
-    </div>
-    <div class="boardwrap" id="boardwrap"><div class="board empty" id="board"><img id="boardImg" alt="Assembly view"></div></div>
-  </div>
-
-  <aside class="side">
-        <div class="toolsPanel">
-      <div class="imagePickers editorOnly">
-        <button class="filePicker" id="topFilePicker" type="button">
-          <span class="filePickerIcon">T</span>
-          <span class="filePickerText">
-            <strong>TOP</strong>
-            <span id="topFileMeta">Выбрать изображение</span>
-          </span>
-          <span class="filePickerAction">Выбрать</span>
-        </button>
-        <button class="filePicker" id="bottomFilePicker" type="button">
-          <span class="filePickerIcon">B</span>
-          <span class="filePickerText">
-            <strong>BOTTOM</strong>
-            <span id="bottomFileMeta">Выбрать изображение</span>
-          </span>
-          <span class="filePickerAction">Выбрать</span>
-        </button>
-        <input id="topFile" class="nativeFileInput" type="file" accept="image/*" tabindex="-1">
-        <input id="bottomFile" class="nativeFileInput" type="file" accept="image/*" tabindex="-1">
+  </header>
+  <nav class="projectbar">
+    <button id="projectsButton">▦ Проекты</button>
+    <button id="filesButton">▱ Проводник</button>
+    <span class="divider"></span>
+    <div class="project-title"><strong id="projectName">Откройте проект</strong><span id="saveState"></span></div>
+    <button id="undoButton" disabled title="Отменить · Ctrl+Z">↶</button>
+    <button id="redoButton" disabled title="Повторить · Ctrl+Y">↷</button>
+    <button id="saveButton" disabled>Сохранить</button>
+  </nav>
+  <main class="workspace">
+    <aside class="sidebar">
+      <div class="side-switch" role="group" aria-label="Сторона платы">
+        <button id="topButton" class="active">TOP <small>верх</small></button>
+        <button id="bottomButton">BOTTOM <small>низ</small></button>
       </div>
-      <div class="toolBtns solderOnly">
-        <button id="clearDoneBtn" type="button">Сбросить пайку</button>
+      <label class="searchbox"><span>⌕</span><input id="searchInput" type="search" placeholder="R12, 10k, 100 нФ…" aria-label="Поиск компонентов"></label>
+      <div class="filters">
+        <select id="statusFilter" aria-label="Состояние пайки"><option value="all">Любое состояние</option><option value="pending">Ожидает пайки</option><option value="done">Припаян</option></select>
+        <select id="stageFilter" aria-label="Этап"><option value="">Все этапы</option></select>
+        <select id="groupFilter" aria-label="Группа"><option value="">Все группы</option></select>
       </div>
-      <div class="projectStatus" id="projectStatus"></div>
-      <div class="small editorOnly">Нажмите «Добавить элементы» и выделяйте детали прямоугольником на изображении.</div>
-    </div>
-    <div class="controls">
-      <input id="search" placeholder="Поиск: R15, U1, 100 нФ, BAS16, RS-485...">
-      <select id="stageFilter"><option value="">Все этапы</option></select>
-      <select id="groupFilter"><option value="">Все группы</option></select>
-      <select id="verificationFilter" aria-label="Фильтр проверки компонентов">
-        <option value="">Все проверки</option>
-        <option value="verified">Проверен</option>
-        <option value="unverified">Не проверен</option>
-        <option value="out_of_tolerance">Вне допуска</option>
-      </select>
-    </div>
-
-    <section class="verificationOverview" id="verificationOverview" aria-label="Сводка проверки платы"></section>
-    <section class="verificationExport" aria-label="Экспорт проверки компонентов">
-      <div class="verificationExportHead">
-        <strong>Отчёт по проверке</strong>
-        <span id="verificationExportStatus" role="status" aria-live="polite"></span>
+      <div id="nominalChip" class="nominal-chip" hidden><span></span><button title="Сбросить номинал">×</button></div>
+      <div class="list-tabs"><button id="batchesTab" class="active">По номиналам</button><button id="componentsTab">Компоненты</button></div>
+      <div class="list-heading"><span id="listHint">Начните с большой партии</span><select id="batchSort" aria-label="Сортировка номиналов"><option value="remaining">Осталось ↓</option><option value="total">Количество ↓</option><option value="name">Номинал</option></select></div>
+      <div id="componentList" class="component-list" tabindex="0"></div>
+      <button id="resetFilters" class="quiet">Сбросить фильтры</button>
+    </aside>
+    <section class="board-section">
+      <div class="board-toolbar">
+        <div class="mode-switch"><button id="solderMode" class="active">Пайка</button><button id="editMode">Разметка</button></div>
+        <button id="addComponent" hidden title="Нарисовать область нового компонента">＋ Компонент</button>
+        <button id="loadImage">Изображение платы</button>
+        <div class="zoom-controls"><button id="zoomOut" title="Отдалить">−</button><input id="zoomSlider" type="range" min="5" max="800" value="100" aria-label="Масштаб платы"><button id="zoomIn" title="Приблизить">＋</button><button id="zoomLabel" title="Масштаб 100%">100%</button><button id="fitBoard" title="Вписать плату">Вписать</button></div>
       </div>
-      <div class="verificationExportActions">
-        <button type="button" data-report-format="csv">CSV</button>
-        <button type="button" data-report-format="xlsx">Excel</button>
-        <button type="button" data-report-format="pdf">PDF</button>
+      <div id="boardViewport" class="board-viewport" tabindex="0" aria-label="Плата: колесо — масштаб, пробел и перетаскивание — перемещение">
+        <div id="boardEmpty" class="board-empty"><span class="empty-icon">▧</span><h2>Ваша плата и компоненты</h2><p>Создайте или откройте проект, затем добавьте изображение стороны платы.</p><button id="emptyProjects">Открыть проекты</button></div>
+        <div id="boardSizer" hidden><div id="boardCanvas"><img id="boardImage" alt="Изображение платы" draggable="false"><div id="overlays"></div><div id="drawRectangle" hidden></div></div></div>
       </div>
+      <footer class="board-footer"><div class="legend"><span><i class="pending-dot"></i>Ожидает пайки</span><span><i class="done-dot"></i>Припаян</span></div><span>Колесо — масштаб · Пробел + мышь — перемещение</span></footer>
     </section>
-    <section class="bomManagement editorOnly" aria-label="BOM и резервные копии">
-      <div>
-        <strong>BOM и проверки</strong>
-        <span id="bomStatus">BOM ещё не обновлялась</span>
-      </div>
-      <div class="bomManagementActions">
-        <button id="importBomBtn" type="button">Обновить BOM</button>
-        <button id="openBackupsBtn" type="button">Резервные копии <span id="backupCount">0</span></button>
-      </div>
-      <input id="bomFileInput" class="nativeFileInput" type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values">
-    </section>
-    <section class="matchingManagement editorOnly" aria-label="Автоматическое сопоставление компонентов">
-      <div>
-        <strong>Автосопоставление</strong>
-        <span id="matchingStatus">Исходные данные не выбраны</span>
-      </div>
-      <div class="matchingSourceGrid">
-        <button id="importPlacementBtn" type="button">
-          <strong>1. Pick and Place</strong>
-          <small id="placementSourceStatus">Выбрать CSV/TSV</small>
-        </button>
-        <button id="importRecognitionBtn" type="button">
-          <strong>2. Распознавание</strong>
-          <small id="recognitionSourceStatus">Выбрать JSON/CSV</small>
-        </button>
-      </div>
-      <button id="runMatchingBtn" class="primaryBtn" type="button" disabled>Запустить сопоставление</button>
-      <button id="importMatchingBtn" class="matchingAdvancedBtn" type="button">Открыть готовый сеанс JSON</button>
-      <input id="placementFileInput" class="nativeFileInput" type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values">
-      <input id="recognitionFileInput" class="nativeFileInput" type="file" accept=".json,.csv,.tsv,.txt,application/json,text/csv,text/tab-separated-values">
-      <input id="matchingFileInput" class="nativeFileInput" type="file" accept=".json,application/json">
-    </section>
-
-    <section class="groupPanel editorOnly">
-      <div class="sectionTitle">Этапы пайки</div>
-      <div class="groupCreate">
-        <input id="newStageName" maxlength="40" placeholder="Новый этап">
-        <button id="addStageBtn" type="button">Создать</button>
-      </div>
-      <div class="groupList" id="stageList"></div>
-    </section>
-
-    <section class="groupPanel editorOnly">
-      <div class="sectionTitle">Группы проекта</div>
-      <div class="groupCreate">
-        <input id="newGroupName" maxlength="40" placeholder="Новая группа">
-        <button id="addGroupBtn" type="button">Создать</button>
-      </div>
-      <div class="groupList" id="groupList"></div>
-    </section>
-
-    <section class="inspector editorOnly" id="componentInspector">
-      <div class="inspectorEmpty">Выберите компонент на плате или в списке, чтобы отредактировать его параметры.</div>
-    </section>
-
-    <div class="checkPanel solderOnly">
-      <div id="progressText"><b>Припаяно:</b> 0 / 0</div>
-      <div class="progressLine"><div class="progressFill" id="progressFill"></div></div>
-      <div class="bulkBtns"><button id="markVisibleDone">Отметить видимые</button><button id="clearVisibleDone">Снять с видимых</button></div>
-    </div>
-    <div class="warn editorOnly">Все изменения сохраняются автоматически в папку проекта.</div>
-    <div class="warn solderOnly">Идите по этапам сверху вниз. Клик по компоненту на изображении прокручивает список к нужной позиции.</div>
-    <div id="list"></div>
-  </aside>
-</div>
-<div class="confirmModal" id="confirmModal" hidden>
-  <div class="confirmBackdrop" id="confirmBackdrop"></div>
-  <section class="confirmPanel" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
-    <button class="confirmClose" id="confirmCloseBtn" type="button" aria-label="Закрыть">×</button>
-    <div class="confirmIcon" aria-hidden="true"></div>
-    <h2 id="confirmTitle">Удалить проект?</h2>
-    <p id="confirmText"></p>
-    <div class="confirmActions">
-      <button id="confirmCancelBtn" type="button">Отмена</button>
-      <button id="confirmAcceptBtn" class="dangerAction" type="button">Удалить</button>
-    </div>
-  </section>
-</div>
-<div class="dataModal" id="bomModal" hidden>
-  <div class="dataModalBackdrop" id="bomBackdrop"></div>
-  <section class="dataModalPanel" role="dialog" aria-modal="true" aria-labelledby="bomTitle">
-    <header class="dataModalHead">
-      <div><div class="eyebrow">Контролируемое обновление</div><h2 id="bomTitle">Предпросмотр BOM</h2></div>
-      <button id="bomCloseBtn" type="button" aria-label="Закрыть">×</button>
-    </header>
-    <div class="dataModalBody">
-      <div class="dataSummary" id="bomSummary"></div>
-      <div class="dataChangeList" id="bomChangeList"></div>
-      <label class="dataConfirm" id="bomConflictConfirm" hidden>
-        <input id="bomConflictCheckbox" type="checkbox">
-        <span>Подтверждаю конфликтные изменения и возможное удаление старых результатов проверки.</span>
-      </label>
-    </div>
-    <footer class="dataModalFooter">
-      <button id="bomExportOldBtn" type="button">Экспортировать старые результаты</button>
-      <span></span>
-      <button id="bomCancelBtn" type="button">Отмена</button>
-      <button id="bomApplyBtn" class="primaryBtn" type="button">Применить</button>
-    </footer>
-  </section>
-</div>
-<div class="dataModal" id="backupsModal" hidden>
-  <div class="dataModalBackdrop" id="backupsBackdrop"></div>
-  <section class="dataModalPanel" role="dialog" aria-modal="true" aria-labelledby="backupsTitle">
-    <header class="dataModalHead">
-      <div><div class="eyebrow">Снимки результатов проверки</div><h2 id="backupsTitle">Резервные копии</h2></div>
-      <button id="backupsCloseBtn" type="button" aria-label="Закрыть">×</button>
-    </header>
-    <div class="dataModalBody backupsLayout">
-      <div class="backupList" id="backupList"></div>
-      <section class="backupDetails">
-        <div id="backupComparison" class="dataSummary">Выберите резервную копию.</div>
-        <label>Компоненты для частичного восстановления
-          <input id="backupRefs" autocomplete="off" placeholder="Например: R1, C4">
-        </label>
-        <label class="dataConfirm">
-          <input id="backupOverwriteCheckbox" type="checkbox">
-          <span>Подтверждаю перезапись выбранных текущих результатов.</span>
-        </label>
-      </section>
-    </div>
-    <footer class="dataModalFooter">
-      <span></span><span></span>
-      <button id="restoreSelectedBtn" type="button">Восстановить выбранные</button>
-      <button id="restoreAllBtn" class="primaryBtn" type="button">Восстановить всё</button>
-    </footer>
-  </section>
-</div>
-<div class="dataModal" id="matchingModal" hidden>
-  <div class="dataModalBackdrop" id="matchingBackdrop"></div>
-  <section class="dataModalPanel matchingPanel" role="dialog" aria-modal="true" aria-labelledby="matchingTitle">
-    <header class="dataModalHead">
-      <div><div class="eyebrow">Автоматическое сопоставление</div><h2 id="matchingTitle">Результаты сеанса</h2></div>
-      <button id="matchingCloseBtn" type="button" aria-label="Закрыть">×</button>
-    </header>
-    <div class="dataModalBody">
-      <div class="matchingSummary" id="matchingSummary"></div>
-      <div class="matchingTableWrap">
-        <table class="matchingTable">
-          <thead><tr><th>Компонент</th><th>Сторона</th><th>Результат</th><th>Найденное место</th><th>Решение</th></tr></thead>
-          <tbody id="matchingResults"></tbody>
-        </table>
-      </div>
-    </div>
-    <footer class="dataModalFooter">
-      <span id="matchingDetails"></span><span></span>
-      <button id="matchingCalibrateBtn" type="button">Калибровка и применение</button>
-      <button id="matchingDoneBtn" class="primaryBtn" type="button">Готово</button>
-    </footer>
-  </section>
-</div>
-<div class="dataModal matchingWorkflowModal" id="matchingWorkflowModal" hidden>
-  <div class="dataModalBackdrop" id="matchingWorkflowBackdrop"></div>
-  <section class="dataModalPanel matchingWorkflowPanel" role="dialog" aria-modal="true" aria-labelledby="matchingWorkflowTitle">
-    <header class="dataModalHead">
-      <div>
-        <div class="eyebrow">Калибровка мм → пиксели</div>
-        <h2 id="matchingWorkflowTitle">Предпросмотр применения</h2>
-      </div>
-      <button id="matchingWorkflowCloseBtn" type="button" aria-label="Закрыть">×</button>
-    </header>
-    <div class="matchingWorkflowBody">
-      <aside class="matchingCalibrationPane">
-        <div class="matchingSideTabs" role="tablist" aria-label="Сторона платы">
-          <button id="matchingWorkflowTopBtn" type="button" data-matching-side="TOP">TOP</button>
-          <button id="matchingWorkflowBottomBtn" type="button" data-matching-side="BOTTOM">BOTTOM</button>
-        </div>
-        <p class="matchingInstruction">
-          Для каждой точки нажмите «Указать», затем щёлкните её положение на изображении.
-          Координаты в миллиметрах взяты из сеанса и при необходимости редактируются.
-        </p>
-        <label class="matchingResidualField">
-          Допустимая ошибка, px
-          <input id="matchingResidualLimit" type="number" min="0.01" step="0.1" value="2">
-        </label>
-        <div class="matchingControlPoints" id="matchingControlPoints"></div>
-        <div class="matchingCalibrationActions">
-          <button id="matchingAddPointBtn" type="button">Добавить точку</button>
-          <button id="matchingFitBtn" class="primaryBtn" type="button">Рассчитать</button>
-        </div>
-        <div class="matchingCalibrationStatus" id="matchingCalibrationStatus" role="status" aria-live="polite"></div>
-        <div class="matchingPlanSummary" id="matchingPlanSummary"></div>
-      </aside>
-      <main class="matchingPreviewPane">
-        <div class="matchingPreviewToolbar">
-          <strong id="matchingPreviewSide">TOP</strong>
-          <span id="matchingPickHint">Выберите опорную точку слева</span>
-        </div>
-        <div class="matchingPreviewViewport" id="matchingPreviewViewport">
-          <div class="matchingPreviewStage" id="matchingPreviewStage">
-            <img id="matchingPreviewImage" alt="Предпросмотр платы">
-            <div class="matchingPreviewOverlay" id="matchingPreviewOverlay"></div>
-          </div>
-          <div class="matchingPreviewEmpty" id="matchingPreviewEmpty" hidden>
-            Для этой стороны не выбрано изображение платы.
-          </div>
-        </div>
-        <div class="matchingPreviewLegend">
-          <span><i class="before"></i>Текущее положение</span>
-          <span><i class="after"></i>Предлагаемое положение</span>
-          <span><i class="point"></i>Опорная точка</span>
-        </div>
-        <div class="matchingPlanList" id="matchingPlanList"></div>
-      </main>
-    </div>
-    <footer class="dataModalFooter matchingWorkflowFooter">
-      <span id="matchingWorkflowDetails"></span><span></span>
-      <button id="matchingWorkflowCancelBtn" type="button">Отмена</button>
-      <button id="matchingApplyBtn" class="primaryBtn" type="button" disabled>Применить изменения</button>
-    </footer>
-  </section>
-</div>
-<div class="verificationModal" id="verificationModal" hidden>
-  <div class="verificationBackdrop" id="verificationBackdrop"></div>
-  <section class="verificationPanel" role="dialog" aria-modal="true" aria-labelledby="verificationTitle">
-    <header class="verificationHead">
-      <div>
-        <div class="eyebrow">Проверка компонента</div>
-        <h2 id="verificationTitle">R1</h2>
-      </div>
-      <button id="verificationCloseBtn" type="button" aria-label="Закрыть">×</button>
-    </header>
-    <form class="verificationForm" id="verificationForm">
-      <div class="verificationReference">
-        <div><span>BOM-номинал</span><strong id="verificationBomValue">Не указан</strong></div>
-        <div><span>Допуск</span><strong id="verificationTolerance">Не задан</strong></div>
-      </div>
-      <div class="verificationManualReference" id="verificationManualReference" hidden>
-        <div class="verificationWarning">BOM-номинал не распознан. Укажите опорный номинал вручную для этого компонента.</div>
-        <div class="verificationNumeric">
-          <label>Опорный номинал
-            <input id="verificationReferenceValue" name="referenceValue" inputmode="decimal" autocomplete="off" placeholder="Например, 100">
-            <span class="fieldError" id="verificationReferenceError" hidden>Введите неотрицательное число</span>
-          </label>
-          <label>Единица
-            <select id="verificationReferenceUnit" name="referenceUnit"></select>
-          </label>
+    <aside class="inspector">
+      <div class="section-heading"><h2>Компонент</h2><button id="clearSelection" title="Снять выделение">×</button></div>
+      <div id="inspectorEmpty" class="empty-note">Выберите компонент на плате или в списке.<br><br>ПКМ → «Показать такой же номинал» выделит всю партию на текущей стороне.</div>
+      <div id="inspectorContent" hidden>
+        <h1 id="selectedRef"></h1><div id="selectedNominal" class="selected-nominal"></div>
+        <div id="selectedStatus" class="status-label"></div>
+        <button id="toggleSolder" class="primary full"></button>
+        <button id="sameNominal" class="full">Показать такой же номинал</button>
+        <button id="placeComponent" class="full" hidden>Задать область на плате</button>
+        <p id="selectedNote" class="note"></p>
+        <div id="editorFields" hidden>
+          <label>Обозначение<input id="editRef" maxlength="80"></label>
+          <label>Номинал<input id="editValue" maxlength="200" placeholder="10k или 100 нФ"></label>
+          <label>Тип / корпус<input id="editType" maxlength="120" placeholder="0603"></label>
+          <label>Этап<input id="editStage" list="stageSuggestions"></label>
+          <label>Группа<input id="editGroup" list="groupSuggestions"></label>
+          <label>Заметка<textarea id="editNote" rows="3"></textarea></label>
+          <button id="applyComponent" class="primary full">Применить изменения</button>
+          <button id="deleteComponent" class="danger full">Удалить компонент</button>
         </div>
       </div>
-      <div class="verificationNumeric" id="verificationNumeric">
-        <label>Фактический номинал
-          <input id="verificationActualValue" name="actualValue" inputmode="decimal" autocomplete="off" placeholder="Например, 98,5">
-          <span class="fieldError" id="verificationActualError" hidden>Введите неотрицательное число</span>
-        </label>
-        <label>Единица
-          <select id="verificationUnit" name="unit"></select>
-        </label>
-      </div>
-      <div class="verificationUnsupported" id="verificationUnsupported" hidden>
-        Числовой ввод в первой версии доступен для резисторов и конденсаторов.
-      </div>
-      <section class="verificationResult" id="verificationResult" aria-live="polite"></section>
-      <label>Комментарий
-        <textarea id="verificationComment" name="comment" placeholder="Результат визуального контроля или измерения"></textarea>
-      </label>
-      <label class="verificationToggle">
-        <input id="verificationChecked" name="checked" type="checkbox">
-        <span><strong>Проверен</strong><small>Не зависит от статуса «Припаяно»</small></span>
-      </label>
-      <div class="verificationFooter">
-        <span id="verificationSaveStatus" role="status" aria-live="polite"></span>
-        <button id="verificationDoneBtn" type="button">Готово</button>
-      </div>
-    </form>
-  </section>
-</div>
-<div class="componentContextMenu" id="componentContextMenu" hidden>
-  <button id="contextVerificationBtn" type="button">Проверка компонента</button>
-</div>
-<div class="imagePickerModal" id="imagePickerModal" hidden>
-  <div class="imagePickerBackdrop" id="imagePickerBackdrop"></div>
-  <section class="imagePickerPanel" role="dialog" aria-modal="true" aria-labelledby="imagePickerTitle">
-    <header class="imagePickerHead">
-      <div>
-        <div class="eyebrow">Изображение платы</div>
-        <strong id="imagePickerTitle">Выберите файл</strong>
-      </div>
-      <button id="imagePickerCloseBtn" type="button" aria-label="Закрыть">×</button>
-    </header>
-    <div class="imagePickerBody">
-      <aside class="imagePickerPlaces" id="imagePickerPlaces"></aside>
-      <main class="imagePickerMain">
-        <div class="imagePickerPath">
-          <button id="imagePickerUpBtn" type="button">Назад</button>
-          <span id="imagePickerPathText"></span>
-          <button id="openCurrentFolderBtn" type="button">Открыть эту папку</button>
-        </div>
-        <div class="imagePickerToolbar">
-          <input id="browserSearch" autocomplete="off" placeholder="Поиск по имени">
-          <select id="browserSort">
-            <option value="name">По имени</option>
-            <option value="dateDesc">Сначала новые</option>
-            <option value="dateAsc">Сначала старые</option>
-          </select>
-        </div>
-        <div class="imagePickerGrid" id="imagePickerGrid"></div>
-      </main>
-    </div>
-  </section>
-</div>
-<script src="js/verification.js"></script>
-<script src="js/report.js"></script>
-<script src="js/bom.js"></script>
-<script src="js/matching-geometry.js"></script>
-<script src="js/automatic-matching.js"></script>
-<script src="js/matching-session.js"></script>
-<script src="js/matching-format.js"></script>
-<script src="js/pick-and-place.js"></script>
-<script src="js/recognition-import.js"></script>
-<script src="js/matching-resolution.js"></script>
-<script src="js/matching-view.js"></script>
-<script src="js/matching-calibration.js"></script>
-<script src="js/matching-application.js"></script>
-<script src="js/matching-workflow.js"></script>
-<script src="js/app.js"></script>
+      <section id="batchActions" class="batch-actions" hidden><h3 id="batchTitle"></h3><p id="batchDetail"></p><button id="markBatch" class="primary full">Припаять оставшиеся в партии</button><button id="clearNominal" class="full">Показать все номиналы</button></section>
+      <div id="editHelp" class="help" hidden>Нажмите «＋ Компонент» и нарисуйте прямоугольник. Область можно передвигать и менять её размер за нижний правый угол.</div>
+    </aside>
+  </main>
+  <datalist id="stageSuggestions"></datalist><datalist id="groupSuggestions"></datalist>
+  <dialog id="projectsDialog" class="projects-dialog">
+    <div class="dialog-heading"><div><h2>Проекты</h2><p>Продолжите пайку или создайте новую карту.</p></div><button data-close="projectsDialog">×</button></div>
+    <div class="dialog-toolbar"><button id="newProject" class="primary">＋ Новый проект</button><button id="openProjectFolder">Открыть из папки</button></div>
+    <div id="projectsList" class="projects-list"></div>
+  </dialog>
+  <dialog id="filesDialog" class="files-dialog">
+    <div class="dialog-heading"><div><h2 id="filesTitle">Проводник</h2><p id="filesPurpose">Файлы и папки вашего компьютера</p></div><button data-close="filesDialog">×</button></div>
+    <div class="file-navigation"><button id="fileBack" title="Назад · Alt+←">←</button><button id="fileForward" title="Вперёд · Alt+→">→</button><button id="fileUp" title="На уровень вверх · Alt+↑">↑</button><button id="fileRefresh" title="Обновить · F5">↻</button><form id="addressForm"><input id="fileAddress" aria-label="Путь к папке" spellcheck="false"></form><input id="fileSearch" type="search" placeholder="Поиск в папке" aria-label="Поиск файлов"></div>
+    <div class="file-toolbar"><button id="fileNewFolder">＋ Папка</button><button id="fileCut" title="Ctrl+X">Вырезать</button><button id="fileCopy" title="Ctrl+C">Копировать</button><button id="filePaste" title="Ctrl+V">Вставить</button><button id="fileRename" title="F2">Переименовать</button><button id="fileDelete" class="danger" title="Delete">В корзину</button><span class="spacer"></span><label class="check"><input id="showHidden" type="checkbox">Скрытые</label><button id="fileView" title="Плитки / таблица">Таблица</button><button id="fileSystem">Системный проводник ↗</button></div>
+    <div class="file-body"><nav id="filePlaces"></nav><div class="file-main"><div id="breadcrumbs" class="breadcrumbs"></div><div class="file-columns"><button data-file-sort="name">Имя</button><button data-file-sort="modifiedAt">Изменён</button><button data-file-sort="size">Размер</button></div><div id="fileItems" class="file-items" tabindex="0"></div></div></div>
+    <footer class="file-footer"><span id="fileStatus"></span><button id="filePick" class="primary" hidden>Выбрать</button></footer>
+  </dialog>
+  <dialog id="promptDialog" class="prompt-dialog"><form id="promptForm"><h2 id="promptTitle"></h2><p id="promptMessage"></p><input id="promptInput" autocomplete="off"><div class="prompt-actions"><button id="promptCancel" type="button">Отмена</button><button id="promptOk" class="primary" type="submit">OK</button></div></form></dialog>
+  <div id="contextMenu" class="context-menu" hidden role="menu"></div>
+  <div id="toast" class="toast" hidden role="status"></div>
 </body>
 </html>

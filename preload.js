@@ -1,28 +1,30 @@
 const {contextBridge, ipcRenderer} = require("electron");
-
 contextBridge.exposeInMainWorld("projectApi", {
-  listProjects: () => ipcRenderer.invoke("projects:list"),
-  createProjectFolder: name => ipcRenderer.invoke("projects:create", name),
-  deleteProjectFolder: folderPath => ipcRenderer.invoke("projects:delete", folderPath),
-  selectDirectory: () => ipcRenderer.invoke("project:select-directory"),
-  readProject: folderPath => ipcRenderer.invoke("project:read", folderPath),
-  writeProject: (folderPath, project) => ipcRenderer.invoke("project:write", folderPath, project),
-  saveImage: (folderPath, fileName, bytes) => ipcRenderer.invoke("project:save-image", folderPath, fileName, bytes),
-  copyImage: (folderPath, sourcePath, fileName) => ipcRenderer.invoke("project:copy-image", folderPath, sourcePath, fileName),
-  imageUrl: (folderPath, fileName) => ipcRenderer.invoke("project:image-url", folderPath, fileName),
-  selectBomFile: () => ipcRenderer.invoke("bom:select-file"),
-  selectMatchingSourceFile: kind => ipcRenderer.invoke("matching:select-source-file", kind),
-  selectMatchingSessionFile: () => ipcRenderer.invoke("matching:select-file"),
-  exportVerificationReport: payload => ipcRenderer.invoke("report:export", payload)
+  listProjects:() => ipcRenderer.invoke("projects:list"),
+  createProjectFolder:name => ipcRenderer.invoke("projects:create",name),
+  readProject:folder => ipcRenderer.invoke("project:read",folder),
+  writeProject:(folder,project) => ipcRenderer.invoke("project:write",folder,project),
+  imageUrl:(folder,name) => ipcRenderer.invoke("project:image-url",folder,name),
+  copyImage:(folder,source,side) => ipcRenderer.invoke("project:copy-image",folder,source,side)
 });
-
 contextBridge.exposeInMainWorld("fileBrowserApi", {
-  places: () => ipcRenderer.invoke("file-browser:places"),
-  list: folderPath => ipcRenderer.invoke("file-browser:list", folderPath)
+  places:() => ipcRenderer.invoke("files:places"),
+  list:(folder,hidden) => ipcRenderer.invoke("files:list",folder,hidden),
+  chooseDirectory:() => ipcRenderer.invoke("files:choose-directory"),
+  newFolder:(folder,name) => ipcRenderer.invoke("files:new-folder",folder,name),
+  rename:(file,name) => ipcRenderer.invoke("files:rename",file,name),
+  transfer:(files,folder,mode) => ipcRenderer.invoke("files:transfer",files,folder,mode),
+  trash:files => ipcRenderer.invoke("files:trash",files),
+  open:file => ipcRenderer.invoke("files:open",file),
+  showSystem:folder => ipcRenderer.invoke("files:show-system",folder)
 });
-
 contextBridge.exposeInMainWorld("windowControls", {
-  minimize: () => ipcRenderer.send("window:minimize"),
-  toggleMaximize: () => ipcRenderer.send("window:toggle-maximize"),
-  close: () => ipcRenderer.send("window:close")
+  minimize:() => ipcRenderer.send("window:minimize"),
+  maximize:() => ipcRenderer.send("window:maximize"),
+  close:() => ipcRenderer.send("window:close-ready"),
+  onCloseRequest:callback => {
+    const listener=() => callback();
+    ipcRenderer.on("window:request-close",listener);
+    return () => ipcRenderer.removeListener("window:request-close",listener);
+  }
 });
