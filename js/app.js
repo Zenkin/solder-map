@@ -52,7 +52,7 @@ function filtered(ignoreNominal=false) {
 }
 function currentBatch() {
   if(!state.filters.nominal||!state.project)return null;
-  return A.batches(state.project.components.filter(c=>c.side===state.side),state.project.doneMap).find(b=>b.key===state.filters.nominal);
+  return A.batches(filtered(true),state.project.doneMap).find(b=>b.key===state.filters.nominal);
 }
 function remember() {
   state.undo.push(copy(state.project)); if(state.undo.length>80)state.undo.shift(); state.redo=[];
@@ -576,7 +576,9 @@ async function renameFile() {
 }
 async function relocateProject(from,to) {
   if(!state.folder||from===to)return;
-  const old=from.replace(/[\\/]+$/,""),current=state.folder.toLowerCase(),prefix=old.toLowerCase();
+  const old=from.replace(/[\\/]+$/,"");
+  const normalize=value=>window.fileBrowserApi.platform==="win32"?value.toLowerCase():value;
+  const current=normalize(state.folder),prefix=normalize(old);
   if(current!==prefix&&!current.startsWith(prefix+"\\")&&!current.startsWith(prefix+"/"))return;
   const folder=to+state.folder.slice(old.length);
   await window.fileBrowserApi.list(folder,false);
@@ -638,7 +640,7 @@ function connect() {
       if(!$("boardSizer").hidden)state.fitted?fitBoard():updateBoardSize();
     });
   }).observe($("boardViewport"));
-  $("searchInput").addEventListener("input",event=>{state.filters.query=event.target.value;renderList();renderBoard();});
+  $("searchInput").addEventListener("input",event=>{state.filters.query=event.target.value;renderList();renderBoard();renderInspector();});
   for(const [id,field] of [["statusFilter","status"],["stageFilter","stage"],["groupFilter","group"]])$(id).addEventListener("change",event=>{state.filters[field]=event.target.value;render();});
   $("batchSort").addEventListener("change",event=>{state.sort=event.target.value;renderList();});
   click("batchesTab",()=>{state.tab="batches";state.filters.nominal="";render();});click("componentsTab",()=>{state.tab="components";render();});

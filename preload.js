@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld("projectApi", {
   copyImage:(folder,source,side) => ipcRenderer.invoke("project:copy-image",folder,source,side)
 });
 contextBridge.exposeInMainWorld("fileBrowserApi", {
+  platform:process.platform,
   places:() => ipcRenderer.invoke("files:places"),
   list:(folder,hidden) => ipcRenderer.invoke("files:list",folder,hidden),
   chooseDirectory:() => ipcRenderer.invoke("files:choose-directory"),
